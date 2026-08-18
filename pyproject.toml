@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-inference-lab"
+version = "0.1.0"
+description = "A reproducible benchmark harness for studying local LLM inference systems."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Vashisht Borkar" }
+]
+dependencies = []
+
+[project.scripts]
+inference-lab = "inference_lab.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
