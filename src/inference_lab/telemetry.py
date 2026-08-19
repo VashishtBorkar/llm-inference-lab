@@ -271,6 +271,76 @@ class NvidiaSmiCollector:
                 self._sample_condition.wait(remaining)
             return True
 
+    def wait_for_start_gate(
+        self,
+        *,
+        max_temperature_c: float | None,
+        max_gpu_utilization_pct: float | None,
+        consecutive_samples: int,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Wait for consecutive *new* samples that satisfy the start thresholds."""
+        started = time.monotonic()
+        deadline = started + timeout_seconds
+        consecutive = 0
+        evaluated = 0
+        final_sample: dict[str, Any] | None = None
+        with self._sample_condition:
+            cursor = len(self._samples)
+            first_new_sequence = cursor
+            while True:
+                while cursor < len(self._samples):
+                    sample = self._samples[cursor]
+                    cursor += 1
+                    evaluated += 1
+                    final_sample = sample
+                    temperature = sample.get("temperature_c")
+                    utilization = sample.get("gpu_utilization_pct")
+                    satisfies = True
+                    if max_temperature_c is not None:
+                        satisfies = (
+                            satisfies
+                            and isinstance(temperature, (int, float))
+                            and temperature <= max_temperature_c
+                        )
+                    if max_gpu_utilization_pct is not None:
+                        satisfies = (
+                            satisfies
+                            and isinstance(utilization, (int, float))
+                            and utilization <= max_gpu_utilization_pct
+                        )
+                    if satisfies:
+                        consecutive += 1
+                        if consecutive >= consecutive_samples:
+                            return {
+                                "status": "satisfied",
+                                "wait_seconds": time.monotonic() - started,
+                                "first_new_sample_sequence": first_new_sequence,
+                                "final_sample_sequence": sample.get("sample_sequence"),
+                                "evaluated_samples": evaluated,
+                                "consecutive_samples": consecutive,
+                                "final_temperature_c": temperature,
+                                "final_gpu_utilization_pct": utilization,
+                            }
+                    else:
+                        consecutive = 0
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    final_details = (
+                        f" Last observed temperature={final_sample.get('temperature_c')}, "
+                        f"GPU utilization={final_sample.get('gpu_utilization_pct')}."
+                        if final_sample is not None
+                        else " No qualifying sample was observed."
+                    )
+                    raise TelemetryError(
+                        "telemetry start gate timed out after "
+                        f"{timeout_seconds:g} seconds; needed {consecutive_samples} "
+                        "consecutive new samples within configured thresholds."
+                        + final_details
+                    )
+                self._sample_condition.wait(remaining)
+
     def stop(self) -> None:
         self._stopping.set()
         process = self._process

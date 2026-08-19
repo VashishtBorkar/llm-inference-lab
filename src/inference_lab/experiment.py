@@ -16,7 +16,9 @@ from inference_lab.engines.ollama import OllamaAdapter
 from inference_lab.models import (
     ExperimentRunContext,
     RunConfig,
+    StreamTimingConfig,
     TelemetryConfig,
+    TelemetryStartGateConfig,
 )
 from inference_lab.runner import ProgressCallback, RunResult, run_benchmark
 from inference_lab.workload import load_workload
@@ -32,6 +34,7 @@ RUN_DEFAULT_KEYS = {
     "model",
     "workload",
     "warmup",
+    "warmup_max_output_tokens",
     "repetitions",
     "concurrency",
     "timeout_seconds",
@@ -42,6 +45,7 @@ RUN_DEFAULT_KEYS = {
 
 CONDITION_OVERRIDE_KEYS = {
     "warmup",
+    "warmup_max_output_tokens",
     "repetitions",
     "concurrency",
     "timeout_seconds",
@@ -70,6 +74,7 @@ class ExperimentSpec:
     specification_sha256: str
     defaults: dict[str, Any]
     telemetry: TelemetryConfig
+    stream_timing: StreamTimingConfig
     trials_per_condition: int
     condition_order: str
     order_seed: int
@@ -156,6 +161,15 @@ def _validate_run_values(values: dict[str, Any], source: str) -> None:
             raise ExperimentError(
                 f"{source}.{field_name} must be an integer of at least {minimum}"
             )
+    warmup_max_output_tokens = values.get("warmup_max_output_tokens")
+    if warmup_max_output_tokens is not None and (
+        not isinstance(warmup_max_output_tokens, int)
+        or isinstance(warmup_max_output_tokens, bool)
+        or warmup_max_output_tokens < 1
+    ):
+        raise ExperimentError(
+            f"{source}.warmup_max_output_tokens must be a positive integer or omitted"
+        )
     for field_name, minimum in (
         ("timeout_seconds", 0.001),
         ("inter_request_delay_seconds", 0.0),
@@ -212,6 +226,7 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
         "model": raw_defaults.get("model", "qwen3:4b-instruct"),
         "workload": raw_defaults.get("workload"),
         "warmup": raw_defaults.get("warmup", 1),
+        "warmup_max_output_tokens": raw_defaults.get("warmup_max_output_tokens"),
         "repetitions": raw_defaults.get("repetitions", 3),
         "concurrency": raw_defaults.get("concurrency", 1),
         "timeout_seconds": raw_defaults.get("timeout_seconds", 300.0),
@@ -241,12 +256,71 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
     )
 
     raw_telemetry = _require_table(data, "telemetry")
+    raw_start_gate = raw_telemetry.get("start_gate")
+    if raw_start_gate is not None and not isinstance(raw_start_gate, dict):
+        raise ExperimentError("telemetry.start_gate must be a table")
+    start_gate: TelemetryStartGateConfig | None = None
+    if isinstance(raw_start_gate, dict):
+        unknown_start_gate = set(raw_start_gate) - {
+            "max_temperature_c",
+            "max_gpu_utilization_pct",
+            "consecutive_samples",
+            "timeout_seconds",
+        }
+        if unknown_start_gate:
+            raise ExperimentError(
+                "Unknown telemetry.start_gate keys: "
+                + ", ".join(sorted(unknown_start_gate))
+            )
+        max_temperature_c = raw_start_gate.get("max_temperature_c")
+        if max_temperature_c is not None and (
+            not isinstance(max_temperature_c, (int, float))
+            or isinstance(max_temperature_c, bool)
+            or max_temperature_c <= 0
+        ):
+            raise ExperimentError(
+                "telemetry.start_gate.max_temperature_c must be a positive number"
+            )
+        max_gpu_utilization_pct = raw_start_gate.get(
+            "max_gpu_utilization_pct"
+        )
+        if max_gpu_utilization_pct is not None and (
+            not isinstance(max_gpu_utilization_pct, (int, float))
+            or isinstance(max_gpu_utilization_pct, bool)
+            or not 0 <= max_gpu_utilization_pct <= 100
+        ):
+            raise ExperimentError(
+                "telemetry.start_gate.max_gpu_utilization_pct must be between 0 and 100"
+            )
+        if max_temperature_c is None and max_gpu_utilization_pct is None:
+            raise ExperimentError(
+                "telemetry.start_gate requires at least one threshold"
+            )
+        start_gate = TelemetryStartGateConfig(
+            max_temperature_c=(
+                float(max_temperature_c)
+                if max_temperature_c is not None
+                else None
+            ),
+            max_gpu_utilization_pct=(
+                float(max_gpu_utilization_pct)
+                if max_gpu_utilization_pct is not None
+                else None
+            ),
+            consecutive_samples=_integer(
+                raw_start_gate, "consecutive_samples", 3, 1
+            ),
+            timeout_seconds=_number(
+                raw_start_gate, "timeout_seconds", 300.0, 0.001
+            ),
+        )
     telemetry = TelemetryConfig(
         enabled=bool(raw_telemetry.get("enabled", False)),
         required=bool(raw_telemetry.get("required", False)),
         interval_ms=_integer(raw_telemetry, "interval_ms", 500, 100),
         pre_roll_seconds=_number(raw_telemetry, "pre_roll_seconds", 0.0, 0.0),
         post_roll_seconds=_number(raw_telemetry, "post_roll_seconds", 0.0, 0.0),
+        start_gate=start_gate,
     )
     for boolean_name in ("enabled", "required"):
         raw_value = raw_telemetry.get(boolean_name, False)
@@ -254,6 +328,55 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
             raise ExperimentError(f"telemetry.{boolean_name} must be a boolean")
     if telemetry.required and not telemetry.enabled:
         raise ExperimentError("required telemetry must be enabled")
+    if telemetry.start_gate is not None and not telemetry.enabled:
+        raise ExperimentError("telemetry start gate requires telemetry to be enabled")
+
+    raw_stream_timing = data.get("stream_timing", {})
+    if not isinstance(raw_stream_timing, dict):
+        raise ExperimentError("stream_timing must be a table")
+    unknown_stream_timing = set(raw_stream_timing) - {
+        "enabled",
+        "request_token_logprobs",
+        "require_token_counts",
+        "include_warmup",
+    }
+    if unknown_stream_timing:
+        raise ExperimentError(
+            "Unknown stream_timing keys: "
+            + ", ".join(sorted(unknown_stream_timing))
+        )
+    for boolean_name, default in (
+        ("enabled", False),
+        ("request_token_logprobs", True),
+        ("require_token_counts", False),
+        ("include_warmup", False),
+    ):
+        if not isinstance(raw_stream_timing.get(boolean_name, default), bool):
+            raise ExperimentError(f"stream_timing.{boolean_name} must be a boolean")
+    stream_timing = StreamTimingConfig(
+        enabled=raw_stream_timing.get("enabled", False),
+        request_token_logprobs=raw_stream_timing.get(
+            "request_token_logprobs", True
+        ),
+        require_token_counts=raw_stream_timing.get("require_token_counts", False),
+        include_warmup=raw_stream_timing.get("include_warmup", False),
+    )
+    if stream_timing.require_token_counts and not stream_timing.enabled:
+        raise ExperimentError(
+            "required stream token counts need stream timing enabled"
+        )
+    if (
+        stream_timing.require_token_counts
+        and not stream_timing.request_token_logprobs
+    ):
+        raise ExperimentError(
+            "required stream token counts need token logprobs requested"
+        )
+    if stream_timing.require_token_counts and not stream_timing.include_warmup:
+        raise ExperimentError(
+            "required stream token counts must include warmup so coverage is "
+            "checked before measurement"
+        )
 
     raw_conditions = data.get("conditions")
     if not isinstance(raw_conditions, list) or not raw_conditions:
@@ -279,6 +402,11 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
             )
         merged = {**defaults, **overrides}
         _validate_run_values(merged, source)
+        if stream_timing.require_token_counts and merged["warmup"] < 1:
+            raise ExperimentError(
+                f"{source}: required stream token counts need at least one "
+                "warmup request"
+            )
         conditions.append(
             ExperimentCondition(
                 condition_id=condition_id,
@@ -299,6 +427,7 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
         specification_sha256=hashlib.sha256(raw_bytes).hexdigest(),
         defaults=defaults,
         telemetry=telemetry,
+        stream_timing=stream_timing,
         trials_per_condition=trials_per_condition,
         condition_order=condition_order,
         order_seed=order_seed,
@@ -382,6 +511,11 @@ def run_experiment(
                 output_root=execution_dir,
                 base_url=str(values["base_url"]),
                 warmup=int(values["warmup"]),
+                warmup_max_output_tokens=(
+                    int(values["warmup_max_output_tokens"])
+                    if values["warmup_max_output_tokens"] is not None
+                    else None
+                ),
                 repetitions=int(values["repetitions"]),
                 concurrency=int(values["concurrency"]),
                 timeout_seconds=float(values["timeout_seconds"]),
@@ -395,6 +529,7 @@ def run_experiment(
                     values["inter_request_delay_seconds"]
                 ),
                 telemetry=spec.telemetry,
+                stream_timing=spec.stream_timing,
                 experiment=context,
             )
             adapter = OllamaAdapter(

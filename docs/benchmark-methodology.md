@@ -61,6 +61,11 @@ Use consistent boundaries and record raw timestamps so derived metrics can be re
 
 Report at least median and p95 for request-level latency when sample size supports a tail estimate. Include sample count, mean or median, spread, failures, and the raw per-request data. Do not report p99 from too few samples.
 
+Client-observed stream timing is not GPU-exact token execution time. Record how token
+positions were identified, verify selected-token coverage against the engine's output
+count, and report grouped or buffered stream events. When one event contains multiple
+tokens, any within-event timing reconstruction is an estimate and must be labeled.
+
 ## 4. Resource and Quality Measurements
 
 Performance results should include available resource measurements:
@@ -128,6 +133,11 @@ For laptop experiments:
 - randomize or alternate configuration order;
 - avoid unrelated foreground and background workloads;
 - report run-to-run variance.
+
+When comparable thermal starts are required, prefer a post-warmup state gate over a
+fixed cooldown. Declare temperature and utilization thresholds, the number of
+consecutive qualifying samples, and a timeout. The gate should use only samples
+observed after it begins and fail before measurement if the state cannot be reached.
 
 Thermal throttling and cold-start effects are part of the system, but they must not be mistaken for an engine change.
 

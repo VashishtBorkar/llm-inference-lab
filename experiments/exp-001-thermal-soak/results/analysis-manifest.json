@@ -1,0 +1,19 @@
+{
+  "analysis_version": "1.0",
+  "execution_id": "20260819T052318Z-dcf0a21f",
+  "experiment_id": "exp-001-thermal-soak",
+  "figures": [
+    "figures/thermal-timeline.svg",
+    "figures/thermal-timeline.png",
+    "figures/throughput-vs-gpu-state.svg",
+    "figures/throughput-vs-gpu-state.png",
+    "figures/condition-comparison.svg",
+    "figures/condition-comparison.png"
+  ],
+  "measurement_rows": 20,
+  "run_ids": [
+    "20260819T052318Z-exp-001-thermal-soak-cooldown-60s-trial-01-10e5c5be",
+    "20260819T053639Z-exp-001-thermal-soak-continuous-trial-01-01e6c860"
+  ],
+  "specification_sha256": "e1915e9c9e9b22a5de3fd6a2e2c6c30606e47bbe94b9d727736c5eda603d4337"
+}

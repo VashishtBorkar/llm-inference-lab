@@ -1,0 +1,60 @@
+schema_version = "1.0"
+
+[experiment]
+id = "exp-002-continuous-thermal-drift"
+title = "Continuous decode performance as laptop GPU temperature rises"
+question = """
+During sustained, identical sequential decode requests, does active decode throughput
+fall as GPU temperature rises, and is any change accompanied by lower SM clocks or
+thermal/power clock-limiting events?
+"""
+hypothesis = """
+Continuous decode will raise GPU temperature. If thermal clock management constrains
+the workload, later requests will have lower output tokens per second and higher
+engine TPOT alongside reduced SM clocks and thermal-limiter events. Temperature
+rising while clocks and decode performance remain stable would challenge that
+mechanism; performance drift without corresponding GPU-state changes would point to
+another cause.
+"""
+
+[defaults]
+engine = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:4b-instruct"
+workload = "workloads/synthetic/decode-soak-v1"
+warmup = 1
+repetitions = 100
+concurrency = 1
+timeout_seconds = 300.0
+keep_alive = "30m"
+capture_output = false
+inter_request_delay_seconds = 0.0
+
+[execution]
+trials_per_condition = 3
+condition_order = "fixed"
+order_seed = 42
+between_runs_seconds = 0.0
+
+[telemetry]
+enabled = true
+required = true
+interval_ms = 500
+pre_roll_seconds = 30.0
+post_roll_seconds = 60.0
+
+# After the exact-prompt warmup, measurement waits for ten consecutive samples that
+# satisfy both thresholds. This matches trial starts by measured GPU state rather
+# than by a fixed sleep duration.
+[telemetry.start_gate]
+max_temperature_c = 70.0
+max_gpu_utilization_pct = 25.0
+consecutive_samples = 10
+timeout_seconds = 900.0
+
+[[conditions]]
+id = "continuous"
+label = "Continuous inference"
+
+[conditions.run]
+inter_request_delay_seconds = 0.0

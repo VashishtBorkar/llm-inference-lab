@@ -72,6 +72,15 @@ def _parse_scenario(data: Any, root: Path, source: str) -> Scenario:
     max_output_tokens = generation["max_output_tokens"]
     if not isinstance(max_output_tokens, int) or isinstance(max_output_tokens, bool) or max_output_tokens < 1:
         raise WorkloadError(f"{source}: generation.max_output_tokens must be a positive integer")
+    context_window = generation.get("context_window")
+    if context_window is not None and (
+        not isinstance(context_window, int)
+        or isinstance(context_window, bool)
+        or context_window < 1
+    ):
+        raise WorkloadError(
+            f"{source}: generation.context_window must be a positive integer"
+        )
 
     raw_validators = data.get("validators", ["non_empty"])
     if not isinstance(raw_validators, list) or not all(
@@ -175,4 +184,3 @@ def load_workload(path: Path) -> WorkloadBundle:
         scenarios=tuple(scenarios),
         content_sha256=_bundle_hash(root),
     )
-

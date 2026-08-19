@@ -133,6 +133,50 @@ inter_request_delay_seconds = 0.0
 
 
 class ExperimentTests(unittest.TestCase):
+    def test_loads_stream_timing_warmup_limit_and_telemetry_start_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_workload(root)
+            directory = _write_experiment(root)
+            path = directory / "experiment.toml"
+            contents = path.read_text(encoding="utf-8")
+            contents = contents.replace(
+                "warmup = 0",
+                "warmup = 1\nwarmup_max_output_tokens = 64",
+                1,
+            )
+            contents = contents.replace(
+                "[[conditions]]",
+                """[telemetry.start_gate]
+max_temperature_c = 55.0
+max_gpu_utilization_pct = 5.0
+consecutive_samples = 4
+timeout_seconds = 600.0
+[stream_timing]
+enabled = true
+request_token_logprobs = true
+require_token_counts = true
+include_warmup = true
+[[conditions]]""",
+                1,
+            )
+            contents = contents.replace("enabled = false", "enabled = true", 1)
+            path.write_text(contents, encoding="utf-8")
+
+            spec = load_experiment(directory, repo_root=root)
+
+            self.assertEqual(spec.defaults["warmup_max_output_tokens"], 64)
+            self.assertTrue(spec.stream_timing.require_token_counts)
+            self.assertTrue(spec.stream_timing.include_warmup)
+            self.assertEqual(
+                spec.telemetry.start_gate.max_temperature_c,  # type: ignore[union-attr]
+                55.0,
+            )
+            self.assertEqual(
+                spec.telemetry.start_gate.consecutive_samples,  # type: ignore[union-attr]
+                4,
+            )
+
     def test_loads_and_hashes_valid_specification(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

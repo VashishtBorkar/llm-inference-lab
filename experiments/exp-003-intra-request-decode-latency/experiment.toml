@@ -1,0 +1,66 @@
+schema_version = "1.0"
+
+[experiment]
+id = "exp-003-intra-request-decode-latency"
+title = "Output-token latency across one long streamed response"
+question = """
+As one autoregressive response grows from its first generated token to token 4096,
+does client-observed output-token interarrival latency increase, and does any change
+align with sequence position, GPU temperature, SM clocks, or clock-limiting events?
+"""
+hypothesis = """
+Later tokens may arrive more slowly because each decode step attends over a longer
+sequence and larger KV cache. Increasing interarrival latency while GPU clocks remain
+stable would support a sequence-length mechanism. A rise that coincides with higher
+temperature, thermal limiting, and lower SM clocks would instead support a thermal
+mechanism. A flat latency curve would challenge both slowdown explanations over this
+decode range.
+"""
+
+[defaults]
+engine = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:4b-instruct"
+workload = "workloads/synthetic/long-stream-v1"
+warmup = 1
+warmup_max_output_tokens = 64
+repetitions = 1
+concurrency = 1
+timeout_seconds = 900.0
+keep_alive = "30m"
+capture_output = false
+inter_request_delay_seconds = 0.0
+
+[execution]
+trials_per_condition = 5
+condition_order = "fixed"
+order_seed = 42
+between_runs_seconds = 0.0
+
+[telemetry]
+enabled = true
+required = true
+interval_ms = 500
+pre_roll_seconds = 30.0
+post_roll_seconds = 60.0
+
+# The short warmup establishes model residency and verifies stream-token coverage.
+# Measurement then waits for a comparable post-warmup GPU state in every trial.
+[telemetry.start_gate]
+max_temperature_c = 70.0
+max_gpu_utilization_pct = 25.0
+consecutive_samples = 10
+timeout_seconds = 1200.0
+
+[stream_timing]
+enabled = true
+request_token_logprobs = true
+require_token_counts = true
+include_warmup = true
+
+[[conditions]]
+id = "long-stream-4096"
+label = "One 4096-token streamed response"
+
+[conditions.run]
+inter_request_delay_seconds = 0.0

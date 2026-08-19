@@ -62,9 +62,18 @@ runs/<run-id>/
   manifest.json       # engine, model, workload, environment, and run settings
   requests.jsonl      # one raw record per warmup and measured request
   summary.json        # aggregates computed from measured requests only
+  events.jsonl        # run, phase, request, gate, and cooldown boundaries
+  gpu_telemetry.jsonl # optional synchronized NVIDIA samples
+  stream_events.jsonl # optional privacy-safe streamed-token timing metadata
 ```
 
 Generated text is hashed but not stored unless `--capture-output` is explicitly supplied. The harness records client-observed TTFT and end-to-end latency alongside Ollama's engine-reported token counts and duration fields. Stream events are counted but are not assumed to correspond one-to-one with tokens.
+
+Experiments can optionally request selected-token logprobs solely to count how many
+tokens each streamed event represents. The resulting private `stream_events.jsonl`
+stores timing, counts, and character lengths--not token identities, generated text,
+or probability values. These measurements are client-observed stream arrival times,
+not GPU kernel timestamps.
 
 ## Experiments
 
@@ -101,6 +110,17 @@ request, but one trial per condition is not enough to establish a general thrott
 curve. Read the [full report](experiments/exp-001-thermal-soak/report.md).
 
 ![Thermal-soak experiment timeline](experiments/exp-001-thermal-soak/figures/thermal-timeline.png)
+
+Two follow-up protocols are ready but have not been run:
+
+- [Experiment 002](experiments/exp-002-continuous-thermal-drift/report.md) repeats
+  sustained 256-token decode across three thermally matched trials.
+- [Experiment 003](experiments/exp-003-intra-request-decode-latency/report.md) measures
+  client-observed token interarrival timing across five 4,096-token responses.
+
+Both use a post-warmup GPU-state gate so measurement waits for sustained temperature
+and utilization thresholds instead of assuming a fixed sleep produces comparable
+starting conditions.
 
 ### Tests
 
@@ -147,9 +167,9 @@ Kernel work may become a later extension after the serving roadmap is complete.
 ## Status
 
 The Phase 1 measurement spine, specification-driven experiment runner, synchronized
-GPU telemetry, and first preliminary Ollama thermal study are implemented. The next
-milestone is to replicate the thermal result with counterbalanced trials and extend
-the synthetic workload matrix before beginning vLLM or SGLang adapters.
+GPU telemetry, and first preliminary Ollama thermal study are implemented. Continuous
+thermal-drift and intra-request stream-latency follow-ups are configured and ready for
+manual execution. Neither follow-up has results yet.
 
 ## Guiding Principle
 

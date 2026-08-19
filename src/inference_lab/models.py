@@ -29,6 +29,36 @@ class WorkloadBundle:
 
 
 @dataclass(frozen=True)
+class StreamEventObservation:
+    """Privacy-safe timing metadata for one Ollama NDJSON stream event.
+
+    ``selected_token_count`` is derived from Ollama's selected-token logprob
+    entries when requested. It is deliberately a count: token text, byte
+    values, and log probabilities are never retained in this artifact.
+    """
+
+    event_index: int
+    received_perf_ns: int
+    previous_event_delta_ns: int | None
+    server_created_at: str | None
+    content_chars: int
+    thinking_chars: int
+    cumulative_content_chars: int
+    cumulative_thinking_chars: int
+    selected_token_count: int | None
+    cumulative_selected_token_count: int
+    done: bool
+
+
+@dataclass(frozen=True)
+class StreamTimingConfig:
+    enabled: bool = False
+    request_token_logprobs: bool = True
+    require_token_counts: bool = False
+    include_warmup: bool = False
+
+
+@dataclass(frozen=True)
 class GenerationObservation:
     started_at_utc: str
     started_perf_ns: int
@@ -51,6 +81,16 @@ class GenerationObservation:
     prompt_eval_duration_ns: int | None
     eval_count: int | None
     eval_duration_ns: int | None
+    stream_events: tuple[StreamEventObservation, ...] = ()
+    stream_logprobs_requested: bool = False
+
+
+@dataclass(frozen=True)
+class TelemetryStartGateConfig:
+    max_temperature_c: float | None = None
+    max_gpu_utilization_pct: float | None = None
+    consecutive_samples: int = 3
+    timeout_seconds: float = 300.0
 
 
 @dataclass(frozen=True)
@@ -60,6 +100,7 @@ class TelemetryConfig:
     interval_ms: int = 500
     pre_roll_seconds: float = 0.0
     post_roll_seconds: float = 0.0
+    start_gate: TelemetryStartGateConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +122,7 @@ class RunConfig:
     output_root: Path
     base_url: str = "http://127.0.0.1:11434"
     warmup: int = 1
+    warmup_max_output_tokens: int | None = None
     repetitions: int = 3
     concurrency: int = 1
     timeout_seconds: float = 300.0
@@ -89,6 +131,7 @@ class RunConfig:
     label: str | None = None
     inter_request_delay_seconds: float = 0.0
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    stream_timing: StreamTimingConfig = field(default_factory=StreamTimingConfig)
     experiment: ExperimentRunContext | None = None
 
 
@@ -137,6 +180,15 @@ class RequestRecord:
     response_chars: int
     response_sha256: str
     response_text: str | None
+    stream_timing_enabled: bool = False
+    stream_events_recorded: int = 0
+    stream_events_with_token_counts: int = 0
+    stream_one_token_events: int = 0
+    stream_grouped_token_events: int = 0
+    stream_selected_token_count: int = 0
+    stream_max_tokens_per_event: int | None = None
+    stream_token_coverage_ratio: float | None = None
+    stream_token_count_matches_eval_count: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

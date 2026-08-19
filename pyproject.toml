@@ -13,6 +13,11 @@ authors = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+analysis = [
+  "matplotlib>=3.9"
+]
+
 [project.scripts]
 inference-lab = "inference_lab.cli:main"
 

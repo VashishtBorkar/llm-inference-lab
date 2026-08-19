@@ -1,0 +1,16 @@
+{
+  "format_version": "1.0",
+  "bundle_id": "synthetic-decode-soak",
+  "bundle_version": "1.0.0",
+  "created_at": "2026-08-19T00:00:00Z",
+  "source": "synthetic",
+  "scenario_count": 1,
+  "workload_families": ["decode-heavy"],
+  "tokenizer": "measured by the target engine",
+  "intended_use": "Apply repeatable sustained autoregressive decode load for GPU thermal and power studies.",
+  "limitations": [
+    "The response intentionally reaches its output limit and is not a semantic-quality benchmark.",
+    "The exact generated content is not retained; output token counts and completion reasons must be checked in results."
+  ]
+}
+

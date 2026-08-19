@@ -6,7 +6,7 @@ from typing import Self
 from unittest.mock import patch
 
 from inference_lab.engines.ollama import OllamaAdapter
-from inference_lab.models import Scenario
+from inference_lab.models import Scenario, StreamTimingConfig
 
 
 class FakeStreamResponse:
@@ -26,6 +26,78 @@ class FakeStreamResponse:
 
 
 class OllamaAdapterTests(unittest.TestCase):
+    def test_records_privacy_safe_selected_token_event_counts(self) -> None:
+        events = [
+            {
+                "created_at": "2026-08-19T00:00:00Z",
+                "message": {"content": "A"},
+                "logprobs": [{"token": "secret-a", "logprob": -0.1}],
+                "done": False,
+            },
+            {
+                "created_at": "2026-08-19T00:00:00.010Z",
+                "message": {"content": "BC"},
+                "logprobs": [
+                    {"token": "secret-b", "logprob": -0.2},
+                    {"token": "secret-c", "logprob": -0.3},
+                ],
+                "done": False,
+            },
+            {
+                "created_at": "2026-08-19T00:00:00.020Z",
+                "message": {"content": ""},
+                "done": True,
+                "eval_count": 3,
+                "eval_duration": 30_000_000,
+            },
+        ]
+        opened_requests = []
+
+        def opener(request, timeout):
+            opened_requests.append(request)
+            return FakeStreamResponse(events)
+
+        scenario = Scenario(
+            scenario_id="timing",
+            task_type="chat",
+            workload_class="decode",
+            messages=({"role": "user", "content": "Generate."},),
+            generation={"max_output_tokens": 3, "context_window": 8192},
+            validators=("non_empty",),
+        )
+        adapter = OllamaAdapter(opener=opener)
+
+        with patch(
+            "inference_lab.engines.ollama.time.perf_counter_ns",
+            side_effect=[
+                1_000_000_000,
+                1_010_000_000,
+                1_025_000_000,
+                1_030_000_000,
+            ],
+        ):
+            observation = adapter.generate(
+                model="test-model",
+                scenario=scenario,
+                keep_alive="5m",
+                stream_timing=StreamTimingConfig(enabled=True),
+            )
+
+        payload = json.loads(opened_requests[0].data.decode("utf-8"))
+        self.assertTrue(payload["logprobs"])
+        self.assertEqual(payload["top_logprobs"], 0)
+        self.assertEqual(payload["options"]["num_ctx"], 8192)
+        self.assertEqual(
+            [event.selected_token_count for event in observation.stream_events],
+            [1, 2, None],
+        )
+        self.assertEqual(
+            observation.stream_events[1].previous_event_delta_ns, 15_000_000
+        )
+        serialized = repr(observation.stream_events)
+        self.assertNotIn("secret-a", serialized)
+        self.assertNotIn("logprob", serialized)
+
     def test_streams_chat_and_collects_final_usage(self) -> None:
         events = [
             {

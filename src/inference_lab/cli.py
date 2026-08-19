@@ -9,7 +9,8 @@ from inference_lab import __version__
 from inference_lab.engines.ollama import OllamaAdapter, OllamaError
 from inference_lab.experiment import ExperimentError, load_experiment, run_experiment
 from inference_lab.models import RequestRecord, RunConfig, TelemetryConfig
-from inference_lab.runner import RunResult, run_benchmark
+from inference_lab.runner import RunResult, StreamTimingError, run_benchmark
+from inference_lab.telemetry import TelemetryError
 from inference_lab.workload import WorkloadError, load_workload
 
 
@@ -203,7 +204,14 @@ def main(argv: list[str] | None = None) -> int:
             "successful"
         ]
         return 1 if failures else 0
-    except (ExperimentError, WorkloadError, OllamaError, ValueError) as exc:
+    except (
+        ExperimentError,
+        WorkloadError,
+        OllamaError,
+        StreamTimingError,
+        TelemetryError,
+        ValueError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

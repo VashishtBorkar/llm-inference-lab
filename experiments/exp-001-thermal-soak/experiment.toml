@@ -1,0 +1,56 @@
+schema_version = "1.0"
+
+[experiment]
+id = "exp-001-thermal-soak"
+title = "Effect of cooldown on sustained decode performance"
+question = """
+Does allowing a laptop GPU to cool between otherwise identical decode requests
+prevent the throughput degradation observed during sustained local inference?
+"""
+hypothesis = """
+Continuous decode will heat the GPU and reduce effective SM clocks, causing output
+tokens per second to fall. A 60-second cooldown between requests should keep the GPU
+cooler and preserve more of its initial active decode throughput. Stable clocks and
+throughput in both conditions would challenge this explanation.
+"""
+
+[defaults]
+engine = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:4b-instruct"
+workload = "workloads/synthetic/decode-soak-v1"
+warmup = 1
+repetitions = 10
+concurrency = 1
+timeout_seconds = 300.0
+keep_alive = "30m"
+capture_output = false
+inter_request_delay_seconds = 0.0
+
+[execution]
+trials_per_condition = 1
+condition_order = "randomized"
+order_seed = 42
+between_runs_seconds = 120.0
+
+[telemetry]
+enabled = true
+required = true
+interval_ms = 500
+pre_roll_seconds = 30.0
+post_roll_seconds = 60.0
+
+[[conditions]]
+id = "continuous"
+label = "Continuous inference"
+
+[conditions.run]
+inter_request_delay_seconds = 0.0
+
+[[conditions]]
+id = "cooldown-60s"
+label = "60-second cooldown"
+
+[conditions.run]
+inter_request_delay_seconds = 60.0
+

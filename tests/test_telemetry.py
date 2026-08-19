@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -33,6 +34,61 @@ class FakeProcess:
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_start_gate_uses_only_samples_observed_after_wait_begins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            collector = NvidiaSmiCollector(
+                Path(temporary) / "gpu.jsonl",
+                run_id="run",
+                origin_perf_ns=time.perf_counter_ns(),
+                interval_ms=500,
+            )
+            with collector._sample_condition:
+                collector._samples.append(
+                    {
+                        "sample_sequence": 0,
+                        "temperature_c": 40.0,
+                        "gpu_utilization_pct": 0.0,
+                    }
+                )
+
+            def add_new_samples() -> None:
+                time.sleep(0.02)
+                with collector._sample_condition:
+                    collector._samples.extend(
+                        [
+                            {
+                                "sample_sequence": 1,
+                                "temperature_c": 70.0,
+                                "gpu_utilization_pct": 0.0,
+                            },
+                            {
+                                "sample_sequence": 2,
+                                "temperature_c": 49.0,
+                                "gpu_utilization_pct": 1.0,
+                            },
+                            {
+                                "sample_sequence": 3,
+                                "temperature_c": 48.0,
+                                "gpu_utilization_pct": 2.0,
+                            },
+                        ]
+                    )
+                    collector._sample_condition.notify_all()
+
+            producer = threading.Thread(target=add_new_samples)
+            producer.start()
+            result = collector.wait_for_start_gate(
+                max_temperature_c=50.0,
+                max_gpu_utilization_pct=5.0,
+                consecutive_samples=2,
+                timeout_seconds=1.0,
+            )
+            producer.join()
+
+            self.assertEqual(result["first_new_sample_sequence"], 1)
+            self.assertEqual(result["final_sample_sequence"], 3)
+            self.assertEqual(result["evaluated_samples"], 3)
+
     def test_parses_supported_values_and_nulls(self) -> None:
         line = (
             "2026/08/19 12:00:00.000, 0, GPU-test, P0, 75, 99, 48, "

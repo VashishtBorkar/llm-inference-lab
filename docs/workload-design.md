@@ -130,6 +130,7 @@ Scenarios may specify:
 
 - temperature, top-p, top-k, and seed when supported;
 - maximum output tokens;
+- context-window size when the experiment must hold KV-cache capacity constant;
 - stop sequences;
 - repetition or frequency penalties;
 - structured-output requirements.

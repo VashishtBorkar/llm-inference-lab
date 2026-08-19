@@ -62,7 +62,19 @@ class WorkloadTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkloadError, "positive integer"):
                 load_workload(root)
 
+    def test_requires_positive_context_window_when_provided(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scenario = self._scenario("bad-context")
+            scenario["generation"] = {
+                "max_output_tokens": 8,
+                "context_window": 0,
+            }
+            self._bundle(root, [scenario])
+
+            with self.assertRaisesRegex(WorkloadError, "context_window"):
+                load_workload(root)
+
 
 if __name__ == "__main__":
     unittest.main()
-

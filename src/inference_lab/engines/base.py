@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Protocol
 
-from inference_lab.models import GenerationObservation, Scenario
+from inference_lab.models import (
+    GenerationObservation,
+    Scenario,
+    StreamEventObservation,
+    StreamTimingConfig,
+)
+
+StreamEventCallback = Callable[[StreamEventObservation], None]
 
 
 class EngineAdapter(Protocol):
@@ -16,5 +24,6 @@ class EngineAdapter(Protocol):
         model: str,
         scenario: Scenario,
         keep_alive: str,
+        stream_timing: StreamTimingConfig | None = None,
+        stream_event_callback: StreamEventCallback | None = None,
     ) -> GenerationObservation: ...
-

@@ -16,6 +16,8 @@ base_url = "http://127.0.0.1:11434"
 model = "qwen3:4b-instruct"
 workload = "workloads/smoke"
 warmup = 1
+# Optional: shorten warmup generation without changing measured scenarios.
+# warmup_max_output_tokens = 64
 repetitions = 3
 concurrency = 1
 timeout_seconds = 300.0
@@ -36,10 +38,25 @@ interval_ms = 500
 pre_roll_seconds = 0.0
 post_roll_seconds = 0.0
 
+# Optional: after warmup, wait for a reproducible measured GPU state. A gate
+# requires telemetry to be enabled and fails before measurement on timeout.
+# [telemetry.start_gate]
+# max_temperature_c = 70.0
+# max_gpu_utilization_pct = 25.0
+# consecutive_samples = 10
+# timeout_seconds = 900.0
+
+# Optional privacy-safe timing for streamed selected tokens. When required,
+# include a warmup so compatibility is checked before measured work starts.
+[stream_timing]
+enabled = false
+request_token_logprobs = true
+require_token_counts = false
+include_warmup = false
+
 [[conditions]]
 id = "baseline"
 label = "Baseline"
 
 [conditions.run]
 inter_request_delay_seconds = 0.0
-
