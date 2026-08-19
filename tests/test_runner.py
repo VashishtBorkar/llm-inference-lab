@@ -81,6 +81,32 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(result.summary["overall"]["successful"], 6)
             self.assertEqual(result.manifest["status"], "completed")
 
+    def test_inter_request_delay_excludes_the_final_request(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        workload = project_root / "workloads" / "smoke"
+        with tempfile.TemporaryDirectory() as directory:
+            config = RunConfig(
+                model="test-model",
+                workload_path=workload,
+                output_root=Path(directory) / "runs",
+                warmup=0,
+                repetitions=1,
+                concurrency=1,
+                inter_request_delay_seconds=2.0,
+            )
+            with (
+                patch("inference_lab.runner.collect_environment", return_value={}),
+                patch("inference_lab.runner.time.sleep") as sleep,
+            ):
+                result = run_benchmark(
+                    config=config,
+                    adapter=FakeAdapter(),
+                    repo_root=project_root,
+                )
+
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual(result.summary["timing"]["scheduled_idle_seconds"], 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

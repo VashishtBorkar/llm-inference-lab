@@ -1,0 +1,45 @@
+schema_version = "1.0"
+
+[experiment]
+id = "exp-000-example"
+title = "Short experiment title"
+question = """
+What specific system behavior does this experiment test?
+"""
+hypothesis = """
+State the expected result, mechanism, and a result that would challenge it.
+"""
+
+[defaults]
+engine = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:4b-instruct"
+workload = "workloads/smoke"
+warmup = 1
+repetitions = 3
+concurrency = 1
+timeout_seconds = 300.0
+keep_alive = "5m"
+capture_output = false
+inter_request_delay_seconds = 0.0
+
+[execution]
+trials_per_condition = 1
+condition_order = "fixed" # fixed or randomized
+order_seed = 0
+between_runs_seconds = 0.0
+
+[telemetry]
+enabled = true
+required = false
+interval_ms = 500
+pre_roll_seconds = 0.0
+post_roll_seconds = 0.0
+
+[[conditions]]
+id = "baseline"
+label = "Baseline"
+
+[conditions.run]
+inter_request_delay_seconds = 0.0
+

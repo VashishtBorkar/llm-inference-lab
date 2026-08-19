@@ -22,6 +22,7 @@ from inference_lab.metrics import (
     summarize_records,
 )
 from inference_lab.models import RequestRecord, RunConfig, Scenario
+from inference_lab.telemetry import EventTimeline, NvidiaSmiCollector, TelemetryError
 from inference_lab.validators import validate_response, validators_passed
 from inference_lab.workload import load_workload
 
@@ -169,6 +170,16 @@ def run_benchmark(
         raise ValueError("repetitions must be at least one")
     if config.concurrency < 1:
         raise ValueError("concurrency must be at least one")
+    if config.inter_request_delay_seconds < 0:
+        raise ValueError("inter-request delay must be zero or greater")
+    if config.inter_request_delay_seconds > 0 and config.concurrency != 1:
+        raise ValueError("inter-request delay currently requires concurrency 1")
+    if config.telemetry.required and not config.telemetry.enabled:
+        raise ValueError("required telemetry must be enabled")
+    if config.telemetry.interval_ms < 100:
+        raise ValueError("telemetry interval must be at least 100 ms")
+    if config.telemetry.pre_roll_seconds < 0 or config.telemetry.post_roll_seconds < 0:
+        raise ValueError("telemetry pre-roll and post-roll must be zero or greater")
 
     workload = load_workload(config.workload_path)
     model_metadata = adapter.model_metadata(config.model)
@@ -180,6 +191,12 @@ def run_benchmark(
 
     run_origin_perf_ns = time.perf_counter_ns()
     started_at_utc = _utc_now()
+    events = EventTimeline(
+        run_dir / "events.jsonl",
+        run_id=run_id,
+        origin_perf_ns=run_origin_perf_ns,
+    )
+    experiment_context = config.experiment
     manifest: dict[str, Any] = {
         "manifest_version": "1.0",
         "harness_version": __version__,
@@ -208,6 +225,14 @@ def run_benchmark(
             "traffic_model": "closed_loop",
             "timeout_seconds": config.timeout_seconds,
             "capture_output": config.capture_output,
+            "inter_request_delay_seconds": config.inter_request_delay_seconds,
+            "telemetry": {
+                "enabled": config.telemetry.enabled,
+                "required": config.telemetry.required,
+                "interval_ms": config.telemetry.interval_ms,
+                "pre_roll_seconds": config.telemetry.pre_roll_seconds,
+                "post_roll_seconds": config.telemetry.post_roll_seconds,
+            },
         },
         "privacy": {
             "raw_prompts_in_results": False,
@@ -221,11 +246,29 @@ def run_benchmark(
         },
         "environment": collect_environment(repo_root),
     }
+    if experiment_context is not None:
+        manifest["experiment"] = {
+            "experiment_id": experiment_context.experiment_id,
+            "execution_id": experiment_context.execution_id,
+            "condition_id": experiment_context.condition_id,
+            "condition_label": experiment_context.condition_label,
+            "trial_number": experiment_context.trial_number,
+            "schedule_position": experiment_context.schedule_position,
+            "specification_sha256": experiment_context.specification_sha256,
+            "changed_parameters": experiment_context.changed_parameters,
+        }
     _write_json(run_dir / "manifest.json", manifest)
 
     records: list[RequestRecord] = []
     records_lock = threading.Lock()
     next_sequence = 0
+    collector: NvidiaSmiCollector | None = None
+    telemetry_start_error: str | None = None
+    summary: dict[str, Any] | None = None
+    scheduled_idle_seconds = 0.0
+    measurement_elapsed_seconds = 0.0
+    final_status = "running"
+    failure: dict[str, str] | None = None
 
     def execute(
         scenario: Scenario,
@@ -233,6 +276,16 @@ def run_benchmark(
         is_warmup: bool,
         sequence_number: int,
     ) -> RequestRecord:
+        request_id = str(uuid.uuid4())
+        events.emit(
+            "request_start",
+            phase="warmup" if is_warmup else "measurement",
+            request_id=request_id,
+            scenario_id=scenario.scenario_id,
+            iteration=iteration,
+            is_warmup=is_warmup,
+            sequence_number=sequence_number,
+        )
         observation = adapter.generate(
             model=config.model,
             scenario=scenario,
@@ -241,7 +294,7 @@ def run_benchmark(
         record = _request_record(
             run_id=run_id,
             run_origin_perf_ns=run_origin_perf_ns,
-            request_id=str(uuid.uuid4()),
+            request_id=request_id,
             sequence_number=sequence_number,
             scenario=scenario,
             iteration=iteration,
@@ -251,76 +304,212 @@ def run_benchmark(
             observation=observation,
         )
         writer.write(record)
+        events.emit(
+            "request_end",
+            phase="warmup" if is_warmup else "measurement",
+            request_id=request_id,
+            scenario_id=scenario.scenario_id,
+            iteration=iteration,
+            is_warmup=is_warmup,
+            sequence_number=sequence_number,
+            status=record.status,
+        )
         with records_lock:
             records.append(record)
         if progress:
             progress("warmup" if is_warmup else "measured", record)
         return record
 
-    for warmup_iteration in range(1, config.warmup + 1):
-        for scenario in workload.scenarios:
-            execute(scenario, warmup_iteration, True, next_sequence)
-            next_sequence += 1
+    try:
+        events.emit("run_start", phase="initializing")
+        if config.telemetry.enabled:
+            collector = NvidiaSmiCollector(
+                run_dir / "gpu_telemetry.jsonl",
+                run_id=run_id,
+                origin_perf_ns=run_origin_perf_ns,
+                interval_ms=config.telemetry.interval_ms,
+            )
+            try:
+                collector.start()
+                sample_timeout = max(5.0, config.telemetry.interval_ms / 1000 * 4)
+                if not collector.wait_for_sample(sample_timeout):
+                    raise TelemetryError("nvidia-smi produced no valid telemetry samples")
+            except TelemetryError as exc:
+                telemetry_start_error = str(exc)
+                if collector is not None:
+                    collector.stop()
+                    collector = None
+                if config.telemetry.required:
+                    raise
 
-    measured_tasks: list[tuple[Scenario, int, int]] = []
-    for iteration in range(1, config.repetitions + 1):
-        for scenario in workload.scenarios:
-            measured_tasks.append((scenario, iteration, next_sequence))
-            next_sequence += 1
+        if collector is not None:
+            collector.set_phase("pre_roll")
+        events.emit(
+            "phase_start",
+            phase="pre_roll",
+            duration_seconds=config.telemetry.pre_roll_seconds,
+        )
+        if config.telemetry.pre_roll_seconds:
+            time.sleep(config.telemetry.pre_roll_seconds)
+        events.emit("phase_end", phase="pre_roll")
 
-    measurement_started_perf_ns = time.perf_counter_ns()
-    if config.concurrency == 1:
-        for scenario, iteration, sequence_number in measured_tasks:
-            execute(scenario, iteration, False, sequence_number)
-    else:
-        with ThreadPoolExecutor(
-            max_workers=config.concurrency,
-            thread_name_prefix="inference-lab",
-        ) as executor:
-            futures = [
-                executor.submit(execute, scenario, iteration, False, sequence_number)
-                for scenario, iteration, sequence_number in measured_tasks
-            ]
-            for future in as_completed(futures):
-                future.result()
-    measurement_completed_perf_ns = time.perf_counter_ns()
-    measurement_elapsed_seconds = (
-        measurement_completed_perf_ns - measurement_started_perf_ns
-    ) / 1_000_000_000
+        if collector is not None:
+            collector.set_phase("warmup")
+        events.emit("phase_start", phase="warmup")
+        for warmup_iteration in range(1, config.warmup + 1):
+            for scenario in workload.scenarios:
+                execute(scenario, warmup_iteration, True, next_sequence)
+                next_sequence += 1
+        events.emit("phase_end", phase="warmup")
 
-    records.sort(key=lambda item: item.sequence_number)
-    summary = summarize_records(records, measurement_elapsed_seconds)
-    summary.update(
-        {
-            "run_id": run_id,
-            "engine": adapter.name,
-            "model": config.model,
-            "workload_sha256": workload.content_sha256,
+        measured_tasks: list[tuple[Scenario, int, int]] = []
+        for iteration in range(1, config.repetitions + 1):
+            for scenario in workload.scenarios:
+                measured_tasks.append((scenario, iteration, next_sequence))
+                next_sequence += 1
+
+        if collector is not None:
+            collector.set_phase("measurement")
+        events.emit("phase_start", phase="measurement")
+        measurement_started_perf_ns = time.perf_counter_ns()
+        if config.concurrency == 1:
+            for task_index, (scenario, iteration, sequence_number) in enumerate(
+                measured_tasks
+            ):
+                execute(scenario, iteration, False, sequence_number)
+                if (
+                    config.inter_request_delay_seconds > 0
+                    and task_index < len(measured_tasks) - 1
+                ):
+                    scheduled_idle_seconds += config.inter_request_delay_seconds
+                    if collector is not None:
+                        collector.set_phase("cooldown")
+                    events.emit(
+                        "cooldown_start",
+                        phase="cooldown",
+                        duration_seconds=config.inter_request_delay_seconds,
+                        after_sequence_number=sequence_number,
+                    )
+                    time.sleep(config.inter_request_delay_seconds)
+                    events.emit(
+                        "cooldown_end",
+                        phase="cooldown",
+                        after_sequence_number=sequence_number,
+                    )
+                    if collector is not None:
+                        collector.set_phase("measurement")
+        else:
+            with ThreadPoolExecutor(
+                max_workers=config.concurrency,
+                thread_name_prefix="inference-lab",
+            ) as executor:
+                futures = [
+                    executor.submit(execute, scenario, iteration, False, sequence_number)
+                    for scenario, iteration, sequence_number in measured_tasks
+                ]
+                for future in as_completed(futures):
+                    future.result()
+        measurement_completed_perf_ns = time.perf_counter_ns()
+        measurement_elapsed_seconds = (
+            measurement_completed_perf_ns - measurement_started_perf_ns
+        ) / 1_000_000_000
+        events.emit("phase_end", phase="measurement")
+
+        records.sort(key=lambda item: item.sequence_number)
+        summary = summarize_records(records, measurement_elapsed_seconds)
+        measured_records = [record for record in records if not record.is_warmup]
+        active_request_seconds = sum(
+            record.client_e2e_ms for record in measured_records
+        ) / 1000
+        generated_tokens = sum(record.output_tokens or 0 for record in measured_records)
+        engine_decode_seconds = sum(
+            record.ollama_eval_duration_ms or 0 for record in measured_records
+        ) / 1000
+        summary.update(
+            {
+                "run_id": run_id,
+                "engine": adapter.name,
+                "model": config.model,
+                "workload_sha256": workload.content_sha256,
+                "timing": {
+                    "measurement_wall_seconds": measurement_elapsed_seconds,
+                    "active_request_seconds": active_request_seconds,
+                    "scheduled_idle_seconds": scheduled_idle_seconds,
+                    "engine_decode_seconds": engine_decode_seconds,
+                    "wall_output_tokens_per_second": (
+                        generated_tokens / measurement_elapsed_seconds
+                        if measurement_elapsed_seconds > 0
+                        else None
+                    ),
+                    "engine_active_output_tokens_per_second": (
+                        generated_tokens / engine_decode_seconds
+                        if engine_decode_seconds > 0
+                        else None
+                    ),
+                },
+            }
+        )
+        _write_json(run_dir / "summary.json", summary)
+
+        if collector is not None:
+            collector.set_phase("post_roll")
+        events.emit(
+            "phase_start",
+            phase="post_roll",
+            duration_seconds=config.telemetry.post_roll_seconds,
+        )
+        if config.telemetry.post_roll_seconds:
+            time.sleep(config.telemetry.post_roll_seconds)
+        events.emit("phase_end", phase="post_roll")
+        final_status = "completed"
+    except BaseException as exc:
+        final_status = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+        failure = {"type": type(exc).__name__, "message": str(exc)}
+        events.emit("run_error", phase="failed", **failure)
+        raise
+    finally:
+        if collector is not None:
+            collector.set_phase("stopping")
+            collector.stop()
+        events.emit("run_end", phase=final_status, status=final_status)
+        manifest["status"] = final_status
+        manifest["completed_at_utc"] = _utc_now()
+        manifest["failure"] = failure
+        manifest["telemetry"] = (
+            collector.metadata()
+            if collector is not None
+            else {
+                "provider": "nvidia-smi",
+                "sample_count": 0,
+                "start_error": telemetry_start_error,
+            }
+        )
+        artifacts = {"events": "events.jsonl"}
+        if requests_path.exists():
+            artifacts["requests"] = "requests.jsonl"
+        if (run_dir / "summary.json").exists():
+            artifacts["summary"] = "summary.json"
+        if (run_dir / "gpu_telemetry.jsonl").exists():
+            artifacts["gpu_telemetry"] = "gpu_telemetry.jsonl"
+        manifest["artifacts"] = artifacts
+        manifest["result_counts"] = {
+            "warmup": sum(record.is_warmup for record in records),
+            "measured": sum(not record.is_warmup for record in records),
+            "failed": sum(
+                not record.is_warmup and record.status != "success"
+                for record in records
+            ),
+            "quality_failed": sum(
+                not record.is_warmup
+                and record.status == "success"
+                and not record.quality_passed
+                for record in records
+            ),
         }
-    )
-    _write_json(run_dir / "summary.json", summary)
+        _write_json(run_dir / "manifest.json", manifest)
 
-    manifest["status"] = "completed"
-    manifest["completed_at_utc"] = _utc_now()
-    manifest["artifacts"] = {
-        "requests": "requests.jsonl",
-        "summary": "summary.json",
-    }
-    manifest["result_counts"] = {
-        "warmup": sum(record.is_warmup for record in records),
-        "measured": sum(not record.is_warmup for record in records),
-        "failed": sum(
-            not record.is_warmup and record.status != "success" for record in records
-        ),
-        "quality_failed": sum(
-            not record.is_warmup
-            and record.status == "success"
-            and not record.quality_passed
-            for record in records
-        ),
-    }
-    _write_json(run_dir / "manifest.json", manifest)
-
+    if summary is None:
+        raise RuntimeError("benchmark completed without a summary")
     return RunResult(
         run_id=run_id,
         run_dir=run_dir,

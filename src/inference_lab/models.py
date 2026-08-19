@@ -54,6 +54,27 @@ class GenerationObservation:
 
 
 @dataclass(frozen=True)
+class TelemetryConfig:
+    enabled: bool = False
+    required: bool = False
+    interval_ms: int = 500
+    pre_roll_seconds: float = 0.0
+    post_roll_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class ExperimentRunContext:
+    experiment_id: str
+    execution_id: str
+    condition_id: str
+    condition_label: str
+    trial_number: int
+    schedule_position: int
+    specification_sha256: str
+    changed_parameters: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RunConfig:
     model: str
     workload_path: Path
@@ -66,6 +87,9 @@ class RunConfig:
     keep_alive: str = "5m"
     capture_output: bool = False
     label: str | None = None
+    inter_request_delay_seconds: float = 0.0
+    telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    experiment: ExperimentRunContext | None = None
 
 
 @dataclass(frozen=True)

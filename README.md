@@ -66,6 +66,42 @@ runs/<run-id>/
 
 Generated text is hashed but not stored unless `--capture-output` is explicitly supplied. The harness records client-observed TTFT and end-to-end latency alongside Ollama's engine-reported token counts and duration fields. Stream events are counted but are not assumed to correspond one-to-one with tokens.
 
+## Experiments
+
+Versioned studies live under `experiments/`. An experiment specification declares
+its question, hypothesis, conditions, trials, controls, and telemetry. The experiment
+runner expands that specification into concrete low-level benchmark runs while keeping
+all raw artifacts private under `runs/`.
+
+```powershell
+.venv\Scripts\inference-lab.exe experiment validate `
+  experiments\exp-001-thermal-soak
+
+.venv\Scripts\inference-lab.exe experiment run `
+  experiments\exp-001-thermal-soak
+
+.venv\Scripts\python.exe `
+  experiments\exp-001-thermal-soak\analysis.py
+```
+
+Install the optional plotting dependencies before running an experiment analysis:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[analysis]"
+```
+
+The first study compares continuous decode against a 60-second cooldown condition
+while sampling GPU temperature, utilization, clocks, power, memory, performance state,
+and clock-limiting reasons. See the [experiment index](experiments/README.md).
+
+Its preliminary result found that cooldown reduced the maximum measured temperature
+from 92°C to 83°C while median active decode throughput remained similar (62.52 versus
+63.12 tokens/s). Continuous inference showed a clock and throughput drop on its final
+request, but one trial per condition is not enough to establish a general throttling
+curve. Read the [full report](experiments/exp-001-thermal-soak/report.md).
+
+![Thermal-soak experiment timeline](experiments/exp-001-thermal-soak/figures/thermal-timeline.png)
+
 ### Tests
 
 The harness has no runtime package dependencies. Run the deterministic test suite without Ollama:
@@ -106,10 +142,14 @@ Kernel work may become a later extension after the serving roadmap is complete.
 - [Systems Roadmap](docs/roadmap.md) — phases, experiments, completion criteria, and scope boundaries.
 - [Benchmark Methodology](docs/benchmark-methodology.md) — workloads, metrics, controls, reproducibility, quality, and reporting rules.
 - [Workload Design](docs/workload-design.md) — portable scenario format, workload families, validation, and dataset handling.
+- [Experiments](experiments/README.md) — specifications, reports, and headline findings.
 
 ## Status
 
-The Phase 1 measurement spine and Ollama vertical slice are implemented. The next milestone is to run a larger repeated Ollama baseline, inspect run-to-run stability, and expand the synthetic workload matrix before beginning vLLM or SGLang adapters.
+The Phase 1 measurement spine, specification-driven experiment runner, synchronized
+GPU telemetry, and first preliminary Ollama thermal study are implemented. The next
+milestone is to replicate the thermal result with counterbalanced trials and extend
+the synthetic workload matrix before beginning vLLM or SGLang adapters.
 
 ## Guiding Principle
 

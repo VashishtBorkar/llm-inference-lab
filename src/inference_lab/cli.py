@@ -7,7 +7,8 @@ from typing import Any
 
 from inference_lab import __version__
 from inference_lab.engines.ollama import OllamaAdapter, OllamaError
-from inference_lab.models import RequestRecord, RunConfig
+from inference_lab.experiment import ExperimentError, load_experiment, run_experiment
+from inference_lab.models import RequestRecord, RunConfig, TelemetryConfig
 from inference_lab.runner import RunResult, run_benchmark
 from inference_lab.workload import WorkloadError, load_workload
 
@@ -30,6 +31,13 @@ def _positive_float(value: str) -> float:
     parsed = float(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def _non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
     return parsed
 
 
@@ -58,11 +66,32 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=_positive_float, default=300.0)
     run.add_argument("--keep-alive", default="5m")
     run.add_argument("--label")
+    run.add_argument("--inter-request-delay", type=_non_negative_float, default=0.0)
+    run.add_argument("--gpu-telemetry", action="store_true")
+    run.add_argument("--gpu-telemetry-required", action="store_true")
+    run.add_argument("--gpu-sample-interval-ms", type=_positive_integer, default=500)
+    run.add_argument("--gpu-pre-roll", type=_non_negative_float, default=0.0)
+    run.add_argument("--gpu-post-roll", type=_non_negative_float, default=0.0)
     run.add_argument(
         "--capture-output",
         action="store_true",
         help="Include generated text in private run artifacts. Disabled by default.",
     )
+
+    experiment = subparsers.add_parser(
+        "experiment", help="Validate or run a specification-driven experiment."
+    )
+    experiment_commands = experiment.add_subparsers(
+        dest="experiment_command", required=True
+    )
+    experiment_validate = experiment_commands.add_parser(
+        "validate", help="Validate an experiment without running inference."
+    )
+    experiment_validate.add_argument("experiment", type=Path)
+    experiment_run = experiment_commands.add_parser(
+        "run", help="Run every condition and trial in an experiment."
+    )
+    experiment_run.add_argument("experiment", type=Path)
     return parser
 
 
@@ -119,6 +148,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"SHA-256: {workload.content_sha256}")
             return 0
 
+        if args.command == "experiment":
+            spec = load_experiment(args.experiment, repo_root=Path.cwd())
+            if args.experiment_command == "validate":
+                print(f"Valid experiment: {spec.experiment_id}")
+                print(f"Title: {spec.title}")
+                print(f"Conditions: {len(spec.conditions)}")
+                print(f"Trials per condition: {spec.trials_per_condition}")
+                print(f"SHA-256: {spec.specification_sha256}")
+                return 0
+            print(
+                f"Running {spec.experiment_id}: {len(spec.conditions)} conditions x "
+                f"{spec.trials_per_condition} trial(s)",
+                flush=True,
+            )
+            execution = run_experiment(spec, progress=_progress)
+            print(f"Execution: {execution.execution_id}")
+            print(f"Artifacts: {execution.execution_dir}")
+            return 0
+
         config = RunConfig(
             model=args.model,
             workload_path=args.workload,
@@ -131,6 +179,14 @@ def main(argv: list[str] | None = None) -> int:
             keep_alive=args.keep_alive,
             capture_output=args.capture_output,
             label=args.label,
+            inter_request_delay_seconds=args.inter_request_delay,
+            telemetry=TelemetryConfig(
+                enabled=args.gpu_telemetry or args.gpu_telemetry_required,
+                required=args.gpu_telemetry_required,
+                interval_ms=args.gpu_sample_interval_ms,
+                pre_roll_seconds=args.gpu_pre_roll,
+                post_roll_seconds=args.gpu_post_roll,
+            ),
         )
         adapter = OllamaAdapter(
             base_url=config.base_url,
@@ -147,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             "successful"
         ]
         return 1 if failures else 0
-    except (WorkloadError, OllamaError, ValueError) as exc:
+    except (ExperimentError, WorkloadError, OllamaError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
