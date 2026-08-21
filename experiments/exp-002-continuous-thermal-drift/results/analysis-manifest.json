@@ -1,0 +1,26 @@
+{
+  "analysis_version": "1.0",
+  "execution_id": "20260821T155136Z-de129ed2",
+  "experiment_id": "exp-002-continuous-thermal-drift",
+  "figures": [
+    "figures/continuous-thermal-timeline.svg",
+    "figures/continuous-thermal-timeline.png",
+    "figures/clock-state-distributions.svg",
+    "figures/clock-state-distributions.png",
+    "figures/raw-clock-zoom.svg",
+    "figures/raw-clock-zoom.png",
+    "figures/normalized-performance-trajectory.svg",
+    "figures/normalized-performance-trajectory.png",
+    "figures/throughput-vs-gpu-state.svg",
+    "figures/throughput-vs-gpu-state.png",
+    "figures/first-vs-last-segments.svg",
+    "figures/first-vs-last-segments.png"
+  ],
+  "measurement_rows": 300,
+  "run_ids": [
+    "20260821T155136Z-exp-002-continuous-thermal-drift-continuous-tria-60e76b13",
+    "20260821T161303Z-exp-002-continuous-thermal-drift-continuous-tria-18307aae",
+    "20260821T163413Z-exp-002-continuous-thermal-drift-continuous-tria-d63379c2"
+  ],
+  "specification_sha256": "302f789770d26fb228141b63f5bede8ff54040386a226d8ea5e4784730ede514"
+}

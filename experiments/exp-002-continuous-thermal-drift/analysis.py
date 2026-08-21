@@ -78,6 +78,12 @@ def _save(figure: Any, figures_dir: Path, stem: str) -> list[str]:
     for extension in ("svg", "png"):
         path = figures_dir / f"{stem}.{extension}"
         figure.savefig(path, dpi=180, bbox_inches="tight")
+        if extension == "svg":
+            # Matplotlib emits trailing spaces in SVG path data. Normalize the
+            # generated text so committed figures pass repository whitespace checks.
+            svg = path.read_text(encoding="utf-8")
+            normalized = "\n".join(line.rstrip() for line in svg.splitlines()) + "\n"
+            path.write_text(normalized, encoding="utf-8", newline="\n")
         paths.append(path.relative_to(EXPERIMENT_DIR).as_posix())
     return paths
 
@@ -301,6 +307,7 @@ def main() -> int:
 
     try:
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import PercentFormatter
     except ImportError as exc:
         raise SystemExit(
             "matplotlib is required; install the analysis extra with "
@@ -335,57 +342,196 @@ def main() -> int:
         records = [
             row for row in measurements if int(row["trial_number"]) == trial
         ]
-        request_x = [
-            (float(row["started_offset_ms"]) + float(row["completed_offset_ms"]))
-            / 2000.0
-            for row in records
+        request_x = [int(row["request_number"]) for row in records]
+        throughput = [
+            float(row["ollama_output_tokens_per_second"]) for row in records
         ]
-        telemetry = [
-            sample
-            for sample in run["telemetry"]
-            if isinstance(sample.get("sample_offset_ms"), (int, float))
+        mean_clock = [float(row["gpu_sm_clock_mean_mhz"]) for row in records]
+        mean_temperature = [
+            float(row["gpu_temperature_mean_c"]) for row in records
         ]
-        telemetry_x = [float(sample["sample_offset_ms"]) / 1000.0 for sample in telemetry]
+        max_temperature = [
+            float(row["gpu_temperature_max_c"]) for row in records
+        ]
         axes[0][column].plot(
             request_x,
-            [row.get("ollama_output_tokens_per_second") for row in records],
+            throughput,
             color="#d95f02",
-            linewidth=1.0,
+            linewidth=0.8,
             marker=".",
+            alpha=0.35,
+            label="Request",
+        )
+        axes[0][column].plot(
+            request_x,
+            _rolling_mean(throughput),
+            color="#d95f02",
+            linewidth=2.0,
+            label="5-request mean",
         )
         axes[0][column].set_title(f"Trial {trial}")
         axes[0][column].set_ylabel("Output tok/s")
         axes[1][column].plot(
-            telemetry_x,
-            [sample.get("temperature_c") for sample in telemetry],
-            color="#e41a1c",
-        )
-        axes[1][column].set_ylabel("GPU temp (deg C)")
-        axes[2][column].plot(
-            telemetry_x,
-            [sample.get("sm_clock_mhz") for sample in telemetry],
+            request_x,
+            mean_clock,
             color="#377eb8",
+            linewidth=0.8,
+            marker=".",
+            alpha=0.35,
+            label="Request mean",
         )
-        axes[2][column].set_ylabel("SM clock (MHz)")
-        axes[3][column].plot(
-            telemetry_x,
-            [sample.get("gpu_utilization_pct") for sample in telemetry],
-            color="#984ea3",
-            label="Utilization %",
+        axes[1][column].plot(
+            request_x,
+            _rolling_mean(mean_clock),
+            color="#377eb8",
+            linewidth=2.0,
+            label="5-request mean",
         )
-        axes[3][column].plot(
-            telemetry_x,
-            [sample.get("power_draw_w") for sample in telemetry],
+        axes[1][column].set_ylabel("Mean SM clock (MHz)")
+        axes[2][column].plot(
+            request_x,
+            max_temperature,
+            color="#e41a1c",
+            linewidth=0.8,
+            alpha=0.25,
+            label="Request max",
+        )
+        axes[2][column].plot(
+            request_x,
+            _rolling_mean(mean_temperature),
+            color="#e41a1c",
+            linewidth=2.0,
+            label="5-request mean",
+        )
+        axes[2][column].set_ylabel("GPU temp (deg C)")
+        axes[3][column].step(
+            request_x,
+            [int(row.get("gpu_limited_sw_thermal_seen") is True) for row in records],
+            where="mid",
+            color="#e41a1c",
+            linewidth=1.5,
+            label="SW thermal",
+        )
+        axes[3][column].step(
+            request_x,
+            [int(row.get("gpu_limited_sw_power_seen") is True) for row in records],
+            where="mid",
             color="#4daf4a",
-            label="Power W",
+            linewidth=1.2,
+            label="SW power",
         )
-        axes[3][column].set_ylabel("Utilization / power")
-        axes[3][column].set_xlabel("Run elapsed time (s)")
+        axes[3][column].set_ylabel("Limiter observed")
+        axes[3][column].set_yticks([0, 1], ["No", "Yes"])
+        axes[3][column].set_ylim(-0.1, 1.1)
+        axes[3][column].set_xlabel("Measured request number")
         axes[3][column].legend(fontsize=8)
         for row_index in range(4):
             axes[row_index][column].grid(alpha=0.2)
-    figure.suptitle("Continuous inference: performance and GPU state")
+        if column == 0:
+            for row_index in range(3):
+                axes[row_index][column].legend(fontsize=8)
+    figure.suptitle("Request-aligned burst-to-sustained performance transition")
     figures.extend(_save(figure, figures_dir, "continuous-thermal-timeline"))
+    plt.close(figure)
+
+    # Show how the distribution of sampled clock states changes. Each segment is
+    # normalized independently, so the chart represents the share of observations
+    # rather than the longer wall time of slower requests.
+    figure, axes = plt.subplots(1, len(runs), figsize=(15, 4.5), sharex=True, sharey=True)
+    if len(runs) == 1:
+        axes = [axes]
+    clock_bins = list(range(250, 1901, 150))
+    segment_styles = (
+        ("Early 20%", slice(0, 20), "#1b9e77"),
+        ("Middle 20%", slice(40, 60), "#7570b3"),
+        ("Late 20%", slice(80, 100), "#d95f02"),
+    )
+    for axis, run in zip(axes, runs, strict=True):
+        trial = _run_trial(run)
+        records = sorted(
+            (
+                row
+                for row in measurements
+                if int(row["trial_number"]) == trial
+            ),
+            key=lambda row: int(row["request_number"]),
+        )
+        for label, segment_slice, color in segment_styles:
+            segment = records[segment_slice]
+            segment_start = float(segment[0]["started_offset_ms"])
+            segment_end = float(segment[-1]["completed_offset_ms"])
+            clocks = [
+                float(sample["sm_clock_mhz"])
+                for sample in run["telemetry"]
+                if isinstance(sample.get("sample_offset_ms"), (int, float))
+                and segment_start
+                <= float(sample["sample_offset_ms"])
+                <= segment_end
+                and isinstance(sample.get("sm_clock_mhz"), (int, float))
+            ]
+            weights = [1.0 / len(clocks)] * len(clocks)
+            axis.hist(
+                clocks,
+                bins=clock_bins,
+                weights=weights,
+                histtype="step",
+                linewidth=2.0,
+                color=color,
+                label=label,
+            )
+        axis.set_title(f"Trial {trial}")
+        axis.set_xlabel("Sampled SM clock (MHz)")
+        axis.grid(alpha=0.2)
+        axis.legend(fontsize=8)
+    axes[0].set_ylabel("Share of 500 ms samples")
+    axes[0].yaxis.set_major_formatter(PercentFormatter(1.0))
+    figure.suptitle("Clock-state distribution shifts toward lower frequencies")
+    figures.extend(_save(figure, figures_dir, "clock-state-distributions"))
+    plt.close(figure)
+
+    # Retain a short raw trace to make the rapid clock-state switching explicit
+    # without compressing the entire run into an unreadable line.
+    figure, axes = plt.subplots(1, len(runs), figsize=(15, 4.5), sharey=True)
+    if len(runs) == 1:
+        axes = [axes]
+    for axis, run in zip(axes, runs, strict=True):
+        trial = _run_trial(run)
+        records = sorted(
+            (
+                row
+                for row in measurements
+                if int(row["trial_number"]) == trial
+            ),
+            key=lambda row: int(row["request_number"]),
+        )
+        zoom_start = float(records[49]["started_offset_ms"])
+        zoom_end = zoom_start + 20_000.0
+        samples = [
+            sample
+            for sample in run["telemetry"]
+            if isinstance(sample.get("sample_offset_ms"), (int, float))
+            and zoom_start <= float(sample["sample_offset_ms"]) <= zoom_end
+            and isinstance(sample.get("sm_clock_mhz"), (int, float))
+        ]
+        seconds = [
+            (float(sample["sample_offset_ms"]) - zoom_start) / 1000.0
+            for sample in samples
+        ]
+        clocks = [float(sample["sm_clock_mhz"]) for sample in samples]
+        axis.plot(
+            seconds,
+            clocks,
+            color="#377eb8",
+            marker="o",
+            markersize=3,
+            linewidth=1.0,
+        )
+        axis.set_title(f"Trial {trial}, from request 50")
+        axis.set_xlabel("Seconds from zoom start")
+        axis.grid(alpha=0.2)
+    axes[0].set_ylabel("Instantaneous sampled SM clock (MHz)")
+    figure.suptitle("Twenty-second raw clock snapshots in the hot regime")
+    figures.extend(_save(figure, figures_dir, "raw-clock-zoom"))
     plt.close(figure)
 
     figure, axes = plt.subplots(1, 2, figsize=(12, 4.5))
