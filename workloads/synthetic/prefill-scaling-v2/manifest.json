@@ -1,0 +1,112 @@
+{
+  "format_version": "1.0",
+  "bundle_id": "synthetic-prefill-scaling",
+  "bundle_version": "2.0.0",
+  "created_at": "2026-08-24T00:00:00Z",
+  "source": {
+    "type": "public_dataset",
+    "name": "WikiText-2 Raw",
+    "version": "v1",
+    "split": "train",
+    "url": "https://wikitext.smerity.com/wikitext-2-raw-v1.zip",
+    "license": "Creative Commons Attribution-ShareAlike",
+    "authors": [
+      "Stephen Merity",
+      "Caiming Xiong",
+      "James Bradbury",
+      "Richard Socher"
+    ],
+    "archive_sha256": "ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11",
+    "source_file": "wiki.train.raw",
+    "source_file_sha256": "6707892fa3788b5ab9ed78ab5ff37d9fe825f6011a2ad4fcd6a6d467f0e7da57",
+    "normalized_text_sha256": "9f3398a70dcfe5935ff35c971982d4ca595994f3925d65148a8a5dfd9d49fba4",
+    "normalization": "Removed blank lines and WikiText heading-only lines, joined internal whitespace, restored WikiText punctuation placeholders, and joined the remaining prose lines with blank lines."
+  },
+  "scenario_count": 8,
+  "workload_families": [
+    "prefill-heavy"
+  ],
+  "tokenizer": {
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+    "chat_template": "tokenizer-configured Qwen2.5 chat template",
+    "normalized_corpus_tokens": 2361466
+  },
+  "sampling": [
+    {
+      "target_prompt_tokens": 128,
+      "corpus_start_token": 10000,
+      "corpus_source_token_count": 92,
+      "actual_constructed_prompt_tokens": 128
+    },
+    {
+      "target_prompt_tokens": 4096,
+      "corpus_start_token": 1010000,
+      "corpus_source_token_count": 4060,
+      "actual_constructed_prompt_tokens": 4096
+    },
+    {
+      "target_prompt_tokens": 512,
+      "corpus_start_token": 410000,
+      "corpus_source_token_count": 477,
+      "actual_constructed_prompt_tokens": 512
+    },
+    {
+      "target_prompt_tokens": 16384,
+      "corpus_start_token": 1410000,
+      "corpus_source_token_count": 16349,
+      "actual_constructed_prompt_tokens": 16384
+    },
+    {
+      "target_prompt_tokens": 1024,
+      "corpus_start_token": 610000,
+      "corpus_source_token_count": 989,
+      "actual_constructed_prompt_tokens": 1024
+    },
+    {
+      "target_prompt_tokens": 8192,
+      "corpus_start_token": 1210002,
+      "corpus_source_token_count": 8157,
+      "actual_constructed_prompt_tokens": 8192
+    },
+    {
+      "target_prompt_tokens": 256,
+      "corpus_start_token": 210000,
+      "corpus_source_token_count": 221,
+      "actual_constructed_prompt_tokens": 256
+    },
+    {
+      "target_prompt_tokens": 2048,
+      "corpus_start_token": 810002,
+      "corpus_source_token_count": 2013,
+      "actual_constructed_prompt_tokens": 2048
+    }
+  ],
+  "controlled_dimensions": {
+    "expected_prompt_tokens": [
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384
+    ],
+    "context_window": 32768,
+    "max_output_tokens": 8,
+    "temperature": 0,
+    "concurrency": 1,
+    "tail_instruction": "Reply with only OK."
+  },
+  "files": {
+    "scenarios_sha256": "23004b5915703356955e6741d4bdb95cce4fb504a49ed148051bedf0d73c086b"
+  },
+  "intended_use": "Measure single-request Ollama prefill scaling with deterministic, non-overlapping natural-language corpus samples.",
+  "limitations": [
+    "Each prompt length uses one fixed corpus window, so content and length are not independently randomized.",
+    "Expected prompt counts use the pinned Hugging Face tokenizer; analysis uses Ollama prompt_eval_count.",
+    "The complete source corpus is a required ignored local input and is not distributed with this repository.",
+    "Prompt-cache state is a runtime control established by the experiment launch procedure."
+  ]
+}

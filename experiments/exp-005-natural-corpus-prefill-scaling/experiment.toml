@@ -1,0 +1,58 @@
+schema_version = "1.1"
+
+[experiment]
+id = "exp-005-natural-corpus-prefill-scaling"
+title = "Ollama prefill scaling with natural-language prompt length"
+question = """
+How do Ollama prompt-evaluation duration, prompt-processing throughput, client TTFT,
+and total latency change as natural-language prompt length increases on one RTX
+A6000?
+"""
+hypothesis = """
+Prompt-evaluation duration and client TTFT should increase as actual prompt-token
+count increases. Prompt throughput may improve initially as larger prefills use the
+GPU more fully, while attention work should eventually make duration grow more
+rapidly. Nearly flat prompt-evaluation duration across the tested range would
+challenge the hypothesis.
+"""
+
+[defaults]
+engine = "ollama"
+model = "qwen2.5:7b-instruct"
+workload = "workloads/synthetic/prefill-scaling-v2"
+warmup = 1
+repetitions = 7
+concurrency = 1
+timeout_seconds = 600.0
+capture_output = false
+inter_request_delay_seconds = 0.1
+
+[defaults.engine_options]
+base_url = "http://127.0.0.1:11434"
+keep_alive = "30m"
+
+[execution]
+trials_per_condition = 3
+condition_order = "fixed"
+order_seed = 42
+between_runs_seconds = 2.0
+
+[telemetry]
+enabled = true
+required = true
+interval_ms = 100
+pre_roll_seconds = 2.0
+post_roll_seconds = 2.0
+
+[stream_timing]
+enabled = false
+request_token_logprobs = false
+require_token_counts = false
+include_warmup = false
+
+[[conditions]]
+id = "fixed-runtime"
+label = "WikiText samples with fixed Ollama runtime and 32768-token context"
+
+[conditions.run]
+inter_request_delay_seconds = 0.1
