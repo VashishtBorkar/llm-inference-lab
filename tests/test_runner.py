@@ -25,7 +25,7 @@ class FakeAdapter:
     def model_metadata(self, model: str):
         return {"name": model, "digest": "test-digest"}
 
-    def generate(self, *, model: str, scenario: Scenario, keep_alive: str):
+    def generate(self, *, model: str, scenario: Scenario):
         start = time.perf_counter_ns()
         response = "synthetic response"
         return GenerationObservation(
@@ -59,13 +59,10 @@ class TimingFakeAdapter(FakeAdapter):
         *,
         model: str,
         scenario: Scenario,
-        keep_alive: str,
         stream_timing=None,
         stream_event_callback=None,
     ):
-        observation = super().generate(
-            model=model, scenario=scenario, keep_alive=keep_alive
-        )
+        observation = super().generate(model=model, scenario=scenario)
         stream_events = tuple(
             StreamEventObservation(
                 event_index=index + 1,
@@ -101,14 +98,11 @@ class MismatchedTimingAdapter(FakeAdapter):
         *,
         model: str,
         scenario: Scenario,
-        keep_alive: str,
         stream_timing=None,
         stream_event_callback=None,
     ):
         self.calls += 1
-        observation = super().generate(
-            model=model, scenario=scenario, keep_alive=keep_alive
-        )
+        observation = super().generate(model=model, scenario=scenario)
         event = StreamEventObservation(
             event_index=1,
             received_perf_ns=observation.started_perf_ns + 10_000_000,
@@ -140,14 +134,11 @@ class FailedTimingAdapter(FakeAdapter):
         *,
         model: str,
         scenario: Scenario,
-        keep_alive: str,
         stream_timing=None,
         stream_event_callback=None,
     ):
         self.calls += 1
-        observation = super().generate(
-            model=model, scenario=scenario, keep_alive=keep_alive
-        )
+        observation = super().generate(model=model, scenario=scenario)
         return replace(
             observation,
             status="failed",
@@ -275,11 +266,9 @@ class RunnerTests(unittest.TestCase):
         observed_limits: list[int] = []
         original_generate = adapter.generate
 
-        def generate(*, model: str, scenario: Scenario, keep_alive: str):
+        def generate(*, model: str, scenario: Scenario):
             observed_limits.append(scenario.generation["max_output_tokens"])
-            return original_generate(
-                model=model, scenario=scenario, keep_alive=keep_alive
-            )
+            return original_generate(model=model, scenario=scenario)
 
         adapter.generate = generate  # type: ignore[method-assign]
         with tempfile.TemporaryDirectory() as directory:

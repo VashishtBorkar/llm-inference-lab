@@ -177,7 +177,7 @@ def _request_record(
         observation, enabled=stream_timing_enabled
     )
     return RequestRecord(
-        record_version="1.0",
+        record_version="1.1",
         run_id=run_id,
         request_id=request_id,
         sequence_number=sequence_number,
@@ -212,17 +212,49 @@ def _request_record(
         stream_chunk_count=observation.stream_chunk_count,
         prompt_tokens=observation.prompt_eval_count,
         output_tokens=observation.eval_count,
-        ollama_total_duration_ms=ns_to_ms(observation.total_duration_ns),
-        ollama_load_duration_ms=ns_to_ms(observation.load_duration_ns),
-        ollama_prompt_eval_duration_ms=ns_to_ms(
+        engine_total_duration_ms=ns_to_ms(observation.total_duration_ns),
+        engine_load_duration_ms=ns_to_ms(observation.load_duration_ns),
+        engine_prompt_eval_duration_ms=ns_to_ms(
             observation.prompt_eval_duration_ns
         ),
-        ollama_eval_duration_ms=ns_to_ms(observation.eval_duration_ns),
-        ollama_prompt_tokens_per_second=per_second(
+        engine_eval_duration_ms=ns_to_ms(observation.eval_duration_ns),
+        engine_prompt_tokens_per_second=per_second(
             observation.prompt_eval_count, observation.prompt_eval_duration_ns
         ),
-        ollama_output_tokens_per_second=per_second(
+        engine_output_tokens_per_second=per_second(
             observation.eval_count, observation.eval_duration_ns
+        ),
+        # Compatibility aliases for existing Ollama experiment analyses. They are
+        # intentionally empty for other engines.
+        ollama_total_duration_ms=(
+            ns_to_ms(observation.total_duration_ns)
+            if engine_name == "ollama"
+            else None
+        ),
+        ollama_load_duration_ms=(
+            ns_to_ms(observation.load_duration_ns)
+            if engine_name == "ollama"
+            else None
+        ),
+        ollama_prompt_eval_duration_ms=(
+            ns_to_ms(observation.prompt_eval_duration_ns)
+            if engine_name == "ollama"
+            else None
+        ),
+        ollama_eval_duration_ms=(
+            ns_to_ms(observation.eval_duration_ns)
+            if engine_name == "ollama"
+            else None
+        ),
+        ollama_prompt_tokens_per_second=(
+            per_second(observation.prompt_eval_count, observation.prompt_eval_duration_ns)
+            if engine_name == "ollama"
+            else None
+        ),
+        ollama_output_tokens_per_second=(
+            per_second(observation.eval_count, observation.eval_duration_ns)
+            if engine_name == "ollama"
+            else None
         ),
         done_reason=observation.done_reason,
         response_chars=observation.response_chars,
@@ -343,10 +375,17 @@ def run_benchmark(
         "completed_at_utc": None,
         "engine": {
             "name": adapter.name,
-            "base_url": config.base_url,
             "model": config.model,
             "model_metadata": model_metadata,
-            "keep_alive": config.keep_alive,
+            "capabilities": (
+                adapter.capabilities.to_dict()
+                if hasattr(adapter, "capabilities")
+                else None
+            ),
+            "configuration_notes": getattr(
+                adapter, "configuration_notes", None
+            ),
+            "options": config.engine_options,
         },
         "workload": {
             "path": config.workload_path.as_posix(),
@@ -398,12 +437,12 @@ def run_benchmark(
         },
         "measurement_notes": {
             "ttft": "client request start to first non-empty content or thinking stream event",
-            "stream_chunks": "NDJSON response events; not assumed to be token-aligned",
+            "stream_chunks": "engine stream events; not assumed to be token-aligned",
             "stream_event_timing": (
-                "client-observed NDJSON arrival timing; selected-token counts identify "
+                "client-observed stream arrival timing; selected-token counts identify "
                 "one-token versus grouped events but do not represent GPU-exact token timing"
             ),
-            "ollama_durations": "engine-reported nanosecond fields converted to milliseconds in request records",
+            "engine_durations": "engine-reported nanosecond fields converted to milliseconds when available",
             "summary_excludes_warmup": True,
         },
         "environment": collect_environment(repo_root),
@@ -529,7 +568,6 @@ def run_benchmark(
         observation = adapter.generate(
             model=config.model,
             scenario=scenario,
-            keep_alive=config.keep_alive,
             **generate_options,
         )
         record = _request_record(
@@ -571,7 +609,7 @@ def run_benchmark(
                 )
             if record.stream_token_count_matches_eval_count is not True:
                 raise StreamTimingError(
-                    "selected-token stream coverage did not match Ollama eval_count "
+                    "selected-token stream coverage did not match the engine output count "
                     f"for request {request_id}: observed "
                     f"{record.stream_selected_token_count}, expected "
                     f"{record.output_tokens}"

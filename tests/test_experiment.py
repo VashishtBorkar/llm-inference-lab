@@ -22,7 +22,7 @@ class FakeAdapter:
     def model_metadata(self, model: str):
         return {"name": model, "digest": "fake"}
 
-    def generate(self, *, model: str, scenario: Scenario, keep_alive: str):
+    def generate(self, *, model: str, scenario: Scenario):
         start = time.perf_counter_ns()
         response = "ok"
         return GenerationObservation(
@@ -91,7 +91,7 @@ label = "Duplicate"
 inter_request_delay_seconds = 0.0
 """ if duplicate else ""
     (directory / "experiment.toml").write_text(
-        f"""schema_version = "1.0"
+        f"""schema_version = "1.1"
 [experiment]
 id = "exp-test"
 title = "Test"
@@ -99,16 +99,17 @@ question = "Does it work?"
 hypothesis = "It should work."
 [defaults]
 engine = "ollama"
-base_url = "http://127.0.0.1:11434"
 model = "test-model"
 workload = "workloads/test"
 warmup = 0
 repetitions = 1
 concurrency = 1
 timeout_seconds = 5.0
-keep_alive = "5m"
 capture_output = false
 inter_request_delay_seconds = 0.0
+[defaults.engine_options]
+base_url = "http://127.0.0.1:11434"
+keep_alive = "5m"
 [execution]
 trials_per_condition = 1
 condition_order = "fixed"
@@ -195,13 +196,13 @@ include_warmup = true
             with self.assertRaisesRegex(ExperimentError, "Duplicate condition"):
                 load_experiment(directory, repo_root=root)
 
-    def test_validate_command_does_not_construct_ollama_adapter(self) -> None:
+    def test_validate_command_does_not_construct_an_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _write_workload(root)
             directory = _write_experiment(root)
             with (
-                patch("inference_lab.experiment.OllamaAdapter") as adapter,
+                patch("inference_lab.experiment.create_adapter") as adapter,
                 patch("pathlib.Path.cwd", return_value=root),
             ):
                 result = main(["experiment", "validate", str(directory)])
@@ -215,7 +216,10 @@ include_warmup = true
             directory = _write_experiment(root)
             spec = load_experiment(directory, repo_root=root)
             with (
-                patch("inference_lab.experiment.OllamaAdapter", FakeAdapter),
+                patch(
+                    "inference_lab.experiment.create_adapter",
+                    return_value=FakeAdapter(),
+                ),
                 patch(
                     "inference_lab.runner.collect_environment", return_value={"test": True}
                 ),

@@ -17,6 +17,10 @@ dependencies = []
 analysis = [
   "matplotlib>=3.9"
 ]
+pytorch = [
+  "torch>=2.4",
+  "transformers>=4.45",
+]
 
 [project.scripts]
 inference-lab = "inference_lab.cli:main"

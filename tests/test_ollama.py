@@ -79,7 +79,6 @@ class OllamaAdapterTests(unittest.TestCase):
             observation = adapter.generate(
                 model="test-model",
                 scenario=scenario,
-                keep_alive="5m",
                 stream_timing=StreamTimingConfig(enabled=True),
             )
 
@@ -138,9 +137,7 @@ class OllamaAdapterTests(unittest.TestCase):
             "inference_lab.engines.ollama.time.perf_counter_ns",
             side_effect=[1_000_000_000, 1_050_000_000, 1_200_000_000],
         ):
-            observation = adapter.generate(
-                model="test-model", scenario=scenario, keep_alive="5m"
-            )
+            observation = adapter.generate(model="test-model", scenario=scenario)
 
         self.assertEqual(observation.status, "success")
         self.assertEqual(observation.response_text, "Hello world")
@@ -168,9 +165,7 @@ class OllamaAdapterTests(unittest.TestCase):
             validators=("non_empty",),
         )
 
-        observation = adapter.generate(
-            model="test-model", scenario=scenario, keep_alive="5m"
-        )
+        observation = adapter.generate(model="test-model", scenario=scenario)
 
         self.assertEqual(observation.status, "failed")
         self.assertEqual(observation.error_message, "model runner stopped")

@@ -11,6 +11,11 @@ Recommended reading order:
 3. [Workload design](workload-design.md)
 4. [Experiment ideas](experiment-ideas.md)
 
+Runtime implementation references:
+
+- [Engine architecture](engine-architecture.md)
+- [Runtime setup](runtime-setup.md)
+
 Experiment specifications and completed reports live in [`../experiments/`](../experiments/README.md).
 When project status changes, update the experiment index and concise root README
 without copying the full internal roadmap into the public overview.

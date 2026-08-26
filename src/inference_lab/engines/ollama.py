@@ -9,7 +9,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from inference_lab.engines.base import StreamEventCallback
+from inference_lab.engines.base import EngineCapabilities, StreamEventCallback
 from inference_lab.models import (
     GenerationObservation,
     Scenario,
@@ -24,16 +24,36 @@ class OllamaError(RuntimeError):
 
 class OllamaAdapter:
     name = "ollama"
+    capabilities = EngineCapabilities(
+        server_token_counts=True,
+        server_timing=True,
+        selected_token_counts=True,
+        structured_output=True,
+    )
+    configuration_notes = {
+        "portable_generation_settings": [
+            "temperature",
+            "top_p",
+            "top_k",
+            "seed",
+            "max_output_tokens",
+            "context_window",
+            "stop",
+        ],
+        "engine_specific_generation_settings": ["think"],
+    }
 
     def __init__(
         self,
         *,
         base_url: str = "http://127.0.0.1:11434",
         timeout_seconds: float = 300.0,
+        keep_alive: str = "5m",
         opener: Callable[..., Any] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = keep_alive
         self._opener = opener or urllib.request.urlopen
 
     def _request_json(self, path: str) -> dict[str, Any]:
@@ -71,11 +91,10 @@ class OllamaAdapter:
         suffix = f" Available models: {', '.join(available)}" if available else ""
         raise OllamaError(f"Ollama model '{model}' is not installed.{suffix}")
 
-    @staticmethod
     def _payload(
+        self,
         model: str,
         scenario: Scenario,
-        keep_alive: str,
         stream_timing: StreamTimingConfig | None = None,
     ) -> dict[str, Any]:
         generation = scenario.generation
@@ -97,7 +116,7 @@ class OllamaAdapter:
             "model": model,
             "messages": list(scenario.messages),
             "stream": True,
-            "keep_alive": keep_alive,
+            "keep_alive": self.keep_alive,
             "options": options,
         }
         if scenario.response_format == "json":
@@ -135,12 +154,11 @@ class OllamaAdapter:
         *,
         model: str,
         scenario: Scenario,
-        keep_alive: str,
         stream_timing: StreamTimingConfig | None = None,
         stream_event_callback: StreamEventCallback | None = None,
     ) -> GenerationObservation:
         request_body = json.dumps(
-            self._payload(model, scenario, keep_alive, stream_timing),
+            self._payload(model, scenario, stream_timing),
             separators=(",", ":"),
         ).encode("utf-8")
         request = urllib.request.Request(

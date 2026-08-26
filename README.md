@@ -17,8 +17,10 @@ The harness currently provides:
   memory, and limiter events; and
 - versioned workloads, manifests, analysis scripts, figures, and reports.
 
-Ollama is the current baseline engine. vLLM and SGLang are planned as optimized
-serving backends. The long-term objective is to move from characterization into
+Ollama and vLLM are supported serving backends. A small PyTorch reference backend
+makes the basic prefill and token-by-token decode path visible for learning. SGLang
+remains planned. The
+long-term objective is to move from characterization into
 profiling and make one evidence-driven change inside a serving runtime.
 
 
@@ -88,6 +90,36 @@ Run a versioned experiment with:
   experiments\exp-002-continuous-thermal-drift
 ```
 
+To benchmark a separately running vLLM server:
+
+```powershell
+.venv\Scripts\inference-lab.exe run `
+  --engine vllm `
+  --base-url http://127.0.0.1:8000 `
+  --model Qwen/Qwen3-4B-Instruct-2507 `
+  --workload workloads\smoke `
+  --warmup 1 `
+  --repetitions 3 `
+  --concurrency 1
+```
+
+See [`agent-docs/runtime-setup.md`](agent-docs/runtime-setup.md) for vLLM
+installation, server launch, model naming, and compatibility notes.
+
+The PyTorch reference is installed separately and intentionally supports only
+batch-size-one greedy decoding:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[pytorch]"
+.venv\Scripts\inference-lab.exe run `
+  --engine pytorch_reference `
+  --model Qwen/Qwen3-0.6B `
+  --device cuda `
+  --dtype float16 `
+  --workload workloads\smoke `
+  --concurrency 1
+```
+
 ## Repository layout
 
 ```text
@@ -101,8 +133,8 @@ runs/                private raw executions, excluded from Git
 
 ## Roadmap
 
-The next stages are workload-scaling studies on university GPU compute, vLLM and
-SGLang adapters, concurrency and caching experiments, profiler-led bottleneck
+The next stages are workload-scaling studies on university GPU compute, an SGLang
+adapter, concurrency and caching experiments, profiler-led bottleneck
 analysis, and one measured change inside a serving-runtime execution path.
 
 Detailed planning and methodology live in [`agent-docs/`](agent-docs/README.md).

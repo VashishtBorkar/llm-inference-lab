@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from inference_lab import __version__
-from inference_lab.engines.ollama import OllamaAdapter, OllamaError
+from inference_lab.engines.factory import ENGINE_NAMES, create_adapter
+from inference_lab.engines.ollama import OllamaError
+from inference_lab.engines.pytorch_reference import PyTorchReferenceError
+from inference_lab.engines.vllm import VllmError
 from inference_lab.experiment import ExperimentError, load_experiment, run_experiment
 from inference_lab.models import RequestRecord, RunConfig, TelemetryConfig
 from inference_lab.runner import RunResult, StreamTimingError, run_benchmark
@@ -56,9 +59,24 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("workload", type=Path)
 
     run = subparsers.add_parser("run", help="Run a benchmark workload.")
-    run.add_argument("--engine", choices=["ollama"], default="ollama")
-    run.add_argument("--base-url", default="http://127.0.0.1:11434")
+    run.add_argument("--engine", choices=ENGINE_NAMES, default="ollama")
+    run.add_argument("--base-url")
+    run.add_argument(
+        "--api-key",
+        help="Bearer token for an OpenAI-compatible server; never written to artifacts.",
+    )
     run.add_argument("--model", default="qwen3:4b-instruct")
+    run.add_argument(
+        "--device",
+        default="auto",
+        help="Device for pytorch_reference: auto, cpu, cuda, or cuda:N.",
+    )
+    run.add_argument(
+        "--dtype",
+        choices=["auto", "float32", "float16", "bfloat16"],
+        default="auto",
+        help="Weight dtype for pytorch_reference.",
+    )
     run.add_argument("--workload", type=Path, default=Path("workloads/smoke"))
     run.add_argument("--output-dir", type=Path, default=Path("runs"))
     run.add_argument("--warmup", type=_non_negative_integer, default=1)
@@ -126,7 +144,7 @@ def _print_summary(result: RunResult) -> None:
             f"{group['successful']}/{group['requests']:>7} "
             f"{_format_number(metrics['client_ttft_ms']['median']):>11} "
             f"{_format_number(metrics['client_e2e_ms']['median']):>11} "
-            f"{_format_number(metrics['ollama_output_tokens_per_second']['median']):>13}"
+            f"{_format_number(metrics['engine_output_tokens_per_second']['median']):>13}"
         )
     overall = result.summary["overall"]
     print(
@@ -168,16 +186,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Artifacts: {execution.execution_dir}")
             return 0
 
+        if args.engine == "ollama":
+            engine_options = {
+                "base_url": args.base_url or "http://127.0.0.1:11434",
+                "keep_alive": args.keep_alive,
+            }
+        elif args.engine == "vllm":
+            engine_options = {
+                "base_url": args.base_url or "http://127.0.0.1:8000",
+            }
+        else:
+            engine_options = {"device": args.device, "dtype": args.dtype}
+
         config = RunConfig(
+            engine=args.engine,
             model=args.model,
             workload_path=args.workload,
             output_root=args.output_dir,
-            base_url=args.base_url,
             warmup=args.warmup,
             repetitions=args.repetitions,
             concurrency=args.concurrency,
             timeout_seconds=args.timeout,
-            keep_alive=args.keep_alive,
+            engine_options=engine_options,
             capture_output=args.capture_output,
             label=args.label,
             inter_request_delay_seconds=args.inter_request_delay,
@@ -189,10 +219,7 @@ def main(argv: list[str] | None = None) -> int:
                 post_roll_seconds=args.gpu_post_roll,
             ),
         )
-        adapter = OllamaAdapter(
-            base_url=config.base_url,
-            timeout_seconds=config.timeout_seconds,
-        )
+        adapter = create_adapter(config, api_key=args.api_key)
         result = run_benchmark(
             config=config,
             adapter=adapter,
@@ -208,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         ExperimentError,
         WorkloadError,
         OllamaError,
+        VllmError,
+        PyTorchReferenceError,
         StreamTimingError,
         TelemetryError,
         ValueError,

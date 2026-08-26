@@ -30,10 +30,10 @@ class WorkloadBundle:
 
 @dataclass(frozen=True)
 class StreamEventObservation:
-    """Privacy-safe timing metadata for one Ollama NDJSON stream event.
+    """Privacy-safe timing metadata for one engine stream event.
 
-    ``selected_token_count`` is derived from Ollama's selected-token logprob
-    entries when requested. It is deliberately a count: token text, byte
+    ``selected_token_count`` may be derived from selected-token logprob entries
+    when an engine exposes them. It is deliberately a count: token text, byte
     values, and log probabilities are never retained in this artifact.
     """
 
@@ -120,13 +120,13 @@ class RunConfig:
     model: str
     workload_path: Path
     output_root: Path
-    base_url: str = "http://127.0.0.1:11434"
+    engine: str = "ollama"
     warmup: int = 1
     warmup_max_output_tokens: int | None = None
     repetitions: int = 3
     concurrency: int = 1
     timeout_seconds: float = 300.0
-    keep_alive: str = "5m"
+    engine_options: dict[str, Any] = field(default_factory=dict)
     capture_output: bool = False
     label: str | None = None
     inter_request_delay_seconds: float = 0.0
@@ -170,6 +170,12 @@ class RequestRecord:
     stream_chunk_count: int
     prompt_tokens: int | None
     output_tokens: int | None
+    engine_total_duration_ms: float | None
+    engine_load_duration_ms: float | None
+    engine_prompt_eval_duration_ms: float | None
+    engine_eval_duration_ms: float | None
+    engine_prompt_tokens_per_second: float | None
+    engine_output_tokens_per_second: float | None
     ollama_total_duration_ms: float | None
     ollama_load_duration_ms: float | None
     ollama_prompt_eval_duration_ms: float | None

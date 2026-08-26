@@ -12,7 +12,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from inference_lab.engines.ollama import OllamaAdapter
+from inference_lab.engines.factory import (
+    ENGINE_NAMES,
+    create_adapter,
+    normalize_engine_options,
+)
 from inference_lab.models import (
     ExperimentRunContext,
     RunConfig,
@@ -30,7 +34,6 @@ class ExperimentError(ValueError):
 
 RUN_DEFAULT_KEYS = {
     "engine",
-    "base_url",
     "model",
     "workload",
     "warmup",
@@ -38,7 +41,7 @@ RUN_DEFAULT_KEYS = {
     "repetitions",
     "concurrency",
     "timeout_seconds",
-    "keep_alive",
+    "engine_options",
     "capture_output",
     "inter_request_delay_seconds",
 }
@@ -49,7 +52,7 @@ CONDITION_OVERRIDE_KEYS = {
     "repetitions",
     "concurrency",
     "timeout_seconds",
-    "keep_alive",
+    "engine_options",
     "inter_request_delay_seconds",
 }
 
@@ -147,11 +150,20 @@ def _inside_repo(path: Path, repo_root: Path, label: str) -> Path:
 
 
 def _validate_run_values(values: dict[str, Any], source: str) -> None:
-    if values.get("engine") != "ollama":
-        raise ExperimentError(f"{source}.engine must currently be 'ollama'")
-    for field_name in ("model", "base_url", "keep_alive"):
+    if values.get("engine") not in ENGINE_NAMES:
+        raise ExperimentError(
+            f"{source}.engine must be one of: {', '.join(ENGINE_NAMES)}"
+        )
+    for field_name in ("model",):
         if not isinstance(values.get(field_name), str) or not values[field_name].strip():
             raise ExperimentError(f"{source}.{field_name} must be a non-empty string")
+    engine_options = values.get("engine_options")
+    if not isinstance(engine_options, dict):
+        raise ExperimentError(f"{source}.engine_options must be a table")
+    try:
+        normalize_engine_options(str(values["engine"]), engine_options)
+    except ValueError as exc:
+        raise ExperimentError(f"{source}: {exc}") from exc
     workload = values.get("workload")
     if not isinstance(workload, (str, Path)) or not str(workload).strip():
         raise ExperimentError(f"{source}.workload must be a non-empty path")
@@ -199,7 +211,7 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
         raise ExperimentError("experiment.toml must contain a TOML document")
 
     schema_version = _require_string(data, "schema_version", "experiment.toml")
-    if schema_version != "1.0":
+    if schema_version != "1.1":
         raise ExperimentError(f"Unsupported experiment schema_version: {schema_version}")
 
     experiment = _require_table(data, "experiment")
@@ -220,9 +232,17 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
         raise ExperimentError(
             f"Unknown defaults keys: {', '.join(sorted(unknown_defaults))}"
         )
+    engine = raw_defaults.get("engine", "ollama")
+    raw_engine_options = raw_defaults.get("engine_options", {})
+    if not isinstance(raw_engine_options, dict):
+        raise ExperimentError("defaults.engine_options must be a table")
+    try:
+        engine_options = normalize_engine_options(engine, raw_engine_options)
+    except ValueError as exc:
+        raise ExperimentError(f"defaults: {exc}") from exc
     defaults = {
-        "engine": raw_defaults.get("engine", "ollama"),
-        "base_url": raw_defaults.get("base_url", "http://127.0.0.1:11434"),
+        "engine": engine,
+        "engine_options": engine_options,
         "model": raw_defaults.get("model", "qwen3:4b-instruct"),
         "workload": raw_defaults.get("workload"),
         "warmup": raw_defaults.get("warmup", 1),
@@ -230,7 +250,6 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
         "repetitions": raw_defaults.get("repetitions", 3),
         "concurrency": raw_defaults.get("concurrency", 1),
         "timeout_seconds": raw_defaults.get("timeout_seconds", 300.0),
-        "keep_alive": raw_defaults.get("keep_alive", "5m"),
         "capture_output": raw_defaults.get("capture_output", False),
         "inter_request_delay_seconds": raw_defaults.get(
             "inter_request_delay_seconds", 0.0
@@ -401,6 +420,16 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
                 f"Unknown {source}.run keys: {', '.join(sorted(unknown_overrides))}"
             )
         merged = {**defaults, **overrides}
+        if "engine_options" in overrides:
+            override_options = overrides["engine_options"]
+            if not isinstance(override_options, dict):
+                raise ExperimentError(
+                    f"{source}.run.engine_options must be a table"
+                )
+            merged["engine_options"] = {
+                **defaults["engine_options"],
+                **override_options,
+            }
         _validate_run_values(merged, source)
         if stream_timing.require_token_counts and merged["warmup"] < 1:
             raise ExperimentError(
@@ -411,7 +440,14 @@ def load_experiment(path: Path, *, repo_root: Path) -> ExperimentSpec:
             ExperimentCondition(
                 condition_id=condition_id,
                 label=label,
-                run_overrides=dict(overrides),
+                run_overrides={
+                    **overrides,
+                    **(
+                        {"engine_options": merged["engine_options"]}
+                        if "engine_options" in overrides
+                        else {}
+                    ),
+                },
             )
         )
 
@@ -495,6 +531,9 @@ def run_experiment(
                 time.sleep(spec.between_runs_seconds)
 
             values = {**spec.defaults, **condition.run_overrides}
+            values["engine_options"] = normalize_engine_options(
+                str(values["engine"]), values.get("engine_options")
+            )
             context = ExperimentRunContext(
                 experiment_id=spec.experiment_id,
                 execution_id=execution_id,
@@ -506,10 +545,10 @@ def run_experiment(
                 changed_parameters=dict(condition.run_overrides),
             )
             config = RunConfig(
+                engine=str(values["engine"]),
                 model=str(values["model"]),
                 workload_path=Path(values["workload"]),
                 output_root=execution_dir,
-                base_url=str(values["base_url"]),
                 warmup=int(values["warmup"]),
                 warmup_max_output_tokens=(
                     int(values["warmup_max_output_tokens"])
@@ -519,7 +558,7 @@ def run_experiment(
                 repetitions=int(values["repetitions"]),
                 concurrency=int(values["concurrency"]),
                 timeout_seconds=float(values["timeout_seconds"]),
-                keep_alive=str(values["keep_alive"]),
+                engine_options=dict(values["engine_options"]),
                 capture_output=bool(values["capture_output"]),
                 label=(
                     f"{spec.experiment_id}-{condition.condition_id}-"
@@ -532,10 +571,7 @@ def run_experiment(
                 stream_timing=spec.stream_timing,
                 experiment=context,
             )
-            adapter = OllamaAdapter(
-                base_url=config.base_url,
-                timeout_seconds=config.timeout_seconds,
-            )
+            adapter = create_adapter(config)
             run_entry: dict[str, Any] = {
                 "schedule_position": schedule_index,
                 "condition_id": condition.condition_id,

@@ -1,4 +1,4 @@
-schema_version = "1.0"
+schema_version = "1.1"
 
 [experiment]
 id = "exp-002-continuous-thermal-drift"
@@ -19,16 +19,18 @@ another cause.
 
 [defaults]
 engine = "ollama"
-base_url = "http://127.0.0.1:11434"
 model = "qwen3:4b-instruct"
 workload = "workloads/synthetic/decode-soak-v1"
 warmup = 1
 repetitions = 100
 concurrency = 1
 timeout_seconds = 300.0
-keep_alive = "30m"
 capture_output = false
 inter_request_delay_seconds = 0.0
+
+[defaults.engine_options]
+base_url = "http://127.0.0.1:11434"
+keep_alive = "30m"
 
 [execution]
 trials_per_condition = 3
