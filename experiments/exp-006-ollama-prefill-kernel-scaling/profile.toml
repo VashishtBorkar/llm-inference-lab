@@ -1,0 +1,36 @@
+schema_version = "1.0"
+
+[profile]
+id = "exp-006-ollama-prefill-kernel-scaling"
+model = "qwen2.5:7b-instruct"
+workload = "workloads/synthetic/prefill-kernel-scaling-v1"
+prompt_tokens = [128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096, 8192, 16384]
+pilot_prompt_tokens = [2048, 16384]
+repetitions = 2
+base_url = "http://127.0.0.1:11434"
+keep_alive = "30m"
+request_timeout_seconds = 600.0
+readiness_timeout_seconds = 180.0
+capture_settle_seconds = 1.0
+shutdown_timeout_seconds = 20.0
+required_gpu_name = "NVIDIA RTX A6000"
+
+[ollama.environment]
+OLLAMA_MODELS = "/common/home/vb471/model-cache/ollama"
+OLLAMA_HOST = "127.0.0.1:11434"
+OLLAMA_NO_CLOUD = "1"
+OLLAMA_NUM_PARALLEL = "1"
+OLLAMA_MAX_LOADED_MODELS = "1"
+OLLAMA_CONTEXT_LENGTH = "32768"
+OLLAMA_FLASH_ATTENTION = "1"
+OLLAMA_KV_CACHE_TYPE = "f16"
+OLLAMA_DEBUG = "INFO"
+LLAMA_ARG_CACHE_RAM = "0"
+LLAMA_ARG_CTX_CHECKPOINTS = "0"
+
+[nsight_systems]
+trace = ["cuda", "nvtx", "osrt", "cublas"]
+cuda_graph_trace = "node"
+sample = "none"
+cpu_context_switches = "none"
+export = "sqlite"

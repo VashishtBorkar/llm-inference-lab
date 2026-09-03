@@ -1,0 +1,220 @@
+{
+  "format_version": "1.0",
+  "bundle_id": "synthetic-prefill-kernel-scaling",
+  "bundle_version": "1.0.0",
+  "created_at": "2026-08-27T00:00:00Z",
+  "source": {
+    "type": "public_dataset",
+    "name": "WikiText-2 Raw",
+    "version": "v1",
+    "split": "train",
+    "url": "https://wikitext.smerity.com/wikitext-2-raw-v1.zip",
+    "license": "Creative Commons Attribution-ShareAlike",
+    "authors": [
+      "Stephen Merity",
+      "Caiming Xiong",
+      "James Bradbury",
+      "Richard Socher"
+    ],
+    "archive_sha256": "ef7edb566e3e2b2d31b29c1fdb0c89a4cc683597484c3dc2517919c615435a11",
+    "source_file": "wiki.train.raw",
+    "source_file_sha256": "6707892fa3788b5ab9ed78ab5ff37d9fe825f6011a2ad4fcd6a6d467f0e7da57",
+    "normalized_text_sha256": "9f3398a70dcfe5935ff35c971982d4ca595994f3925d65148a8a5dfd9d49fba4",
+    "normalization": "Removed blank lines and WikiText heading-only lines, joined internal whitespace, restored WikiText punctuation placeholders, and joined the remaining prose lines with blank lines."
+  },
+  "scenario_count": 22,
+  "workload_families": [
+    "prefill-heavy"
+  ],
+  "tokenizer": {
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+    "chat_template": "tokenizer-configured Qwen2.5 chat template",
+    "normalized_corpus_tokens": 2361466
+  },
+  "sampling": [
+    {
+      "target_prompt_tokens": 128,
+      "profile_role": "profile",
+      "corpus_start_token": 10000,
+      "corpus_source_token_count": 92,
+      "actual_constructed_prompt_tokens": 128
+    },
+    {
+      "target_prompt_tokens": 128,
+      "profile_role": "warmup",
+      "corpus_start_token": 1600000,
+      "corpus_source_token_count": 93,
+      "actual_constructed_prompt_tokens": 128
+    },
+    {
+      "target_prompt_tokens": 256,
+      "profile_role": "profile",
+      "corpus_start_token": 210000,
+      "corpus_source_token_count": 221,
+      "actual_constructed_prompt_tokens": 256
+    },
+    {
+      "target_prompt_tokens": 256,
+      "profile_role": "warmup",
+      "corpus_start_token": 1650000,
+      "corpus_source_token_count": 221,
+      "actual_constructed_prompt_tokens": 256
+    },
+    {
+      "target_prompt_tokens": 512,
+      "profile_role": "profile",
+      "corpus_start_token": 410000,
+      "corpus_source_token_count": 477,
+      "actual_constructed_prompt_tokens": 512
+    },
+    {
+      "target_prompt_tokens": 512,
+      "profile_role": "warmup",
+      "corpus_start_token": 1700001,
+      "corpus_source_token_count": 477,
+      "actual_constructed_prompt_tokens": 512
+    },
+    {
+      "target_prompt_tokens": 768,
+      "profile_role": "profile",
+      "corpus_start_token": 510000,
+      "corpus_source_token_count": 732,
+      "actual_constructed_prompt_tokens": 768
+    },
+    {
+      "target_prompt_tokens": 768,
+      "profile_role": "warmup",
+      "corpus_start_token": 1750000,
+      "corpus_source_token_count": 733,
+      "actual_constructed_prompt_tokens": 768
+    },
+    {
+      "target_prompt_tokens": 1024,
+      "profile_role": "profile",
+      "corpus_start_token": 610000,
+      "corpus_source_token_count": 989,
+      "actual_constructed_prompt_tokens": 1024
+    },
+    {
+      "target_prompt_tokens": 1024,
+      "profile_role": "warmup",
+      "corpus_start_token": 1800000,
+      "corpus_source_token_count": 989,
+      "actual_constructed_prompt_tokens": 1024
+    },
+    {
+      "target_prompt_tokens": 1536,
+      "profile_role": "profile",
+      "corpus_start_token": 710000,
+      "corpus_source_token_count": 1501,
+      "actual_constructed_prompt_tokens": 1536
+    },
+    {
+      "target_prompt_tokens": 1536,
+      "profile_role": "warmup",
+      "corpus_start_token": 1850001,
+      "corpus_source_token_count": 1501,
+      "actual_constructed_prompt_tokens": 1536
+    },
+    {
+      "target_prompt_tokens": 2048,
+      "profile_role": "profile",
+      "corpus_start_token": 810002,
+      "corpus_source_token_count": 2013,
+      "actual_constructed_prompt_tokens": 2048
+    },
+    {
+      "target_prompt_tokens": 2048,
+      "profile_role": "warmup",
+      "corpus_start_token": 1900000,
+      "corpus_source_token_count": 2012,
+      "actual_constructed_prompt_tokens": 2048
+    },
+    {
+      "target_prompt_tokens": 3072,
+      "profile_role": "profile",
+      "corpus_start_token": 910000,
+      "corpus_source_token_count": 3037,
+      "actual_constructed_prompt_tokens": 3072
+    },
+    {
+      "target_prompt_tokens": 3072,
+      "profile_role": "warmup",
+      "corpus_start_token": 1950000,
+      "corpus_source_token_count": 3037,
+      "actual_constructed_prompt_tokens": 3072
+    },
+    {
+      "target_prompt_tokens": 4096,
+      "profile_role": "profile",
+      "corpus_start_token": 1010000,
+      "corpus_source_token_count": 4060,
+      "actual_constructed_prompt_tokens": 4096
+    },
+    {
+      "target_prompt_tokens": 4096,
+      "profile_role": "warmup",
+      "corpus_start_token": 2000000,
+      "corpus_source_token_count": 4060,
+      "actual_constructed_prompt_tokens": 4096
+    },
+    {
+      "target_prompt_tokens": 8192,
+      "profile_role": "profile",
+      "corpus_start_token": 1210002,
+      "corpus_source_token_count": 8157,
+      "actual_constructed_prompt_tokens": 8192
+    },
+    {
+      "target_prompt_tokens": 8192,
+      "profile_role": "warmup",
+      "corpus_start_token": 2050001,
+      "corpus_source_token_count": 8156,
+      "actual_constructed_prompt_tokens": 8192
+    },
+    {
+      "target_prompt_tokens": 16384,
+      "profile_role": "profile",
+      "corpus_start_token": 1410000,
+      "corpus_source_token_count": 16349,
+      "actual_constructed_prompt_tokens": 16384
+    },
+    {
+      "target_prompt_tokens": 16384,
+      "profile_role": "warmup",
+      "corpus_start_token": 2100000,
+      "corpus_source_token_count": 16349,
+      "actual_constructed_prompt_tokens": 16384
+    }
+  ],
+  "controlled_dimensions": {
+    "expected_prompt_tokens": [
+      128,
+      256,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      8192,
+      16384
+    ],
+    "context_window": 32768,
+    "max_output_tokens": 8,
+    "temperature": 0,
+    "concurrency": 1,
+    "tail_instruction": "Reply with only OK."
+  },
+  "files": {
+    "scenarios_sha256": "48d4a78835cb49b7bfd90fe500567e6560aa8ea40d4676d416be62e6041ffc19"
+  },
+  "intended_use": "Profile attention, MLP, KV, and runtime kernel scaling across the short-prompt utilization ramp and long-context prefill decline.",
+  "limitations": [
+    "Each length has one measured natural-language sample and one distinct shape-warmup sample; clean content variation remains the responsibility of the benchmark experiment.",
+    "Expected prompt counts use the pinned Hugging Face tokenizer; every profile capture must validate Ollama prompt_eval_count.",
+    "The complete source corpus is a required ignored local input and is not distributed with this repository."
+  ]
+}
