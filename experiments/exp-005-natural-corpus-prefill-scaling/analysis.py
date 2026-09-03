@@ -250,11 +250,21 @@ def _validate_controls(
     return warnings
 
 
+def _normalize_generated_text(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        "\n".join(line.rstrip() for line in text.splitlines()) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _save(figure: Any, figures_dir: Path, stem: str) -> list[str]:
     paths: list[str] = []
     for extension in ("svg", "png"):
         path = figures_dir / f"{stem}.{extension}"
         figure.savefig(path, dpi=180, bbox_inches="tight")
+        if extension == "svg":
+            _normalize_generated_text(path)
         paths.append(path.relative_to(EXPERIMENT_DIR).as_posix())
     return paths
 
@@ -290,7 +300,7 @@ def _make_figures(
     axes[0].legend()
     axes[1].plot(x, throughput, marker="o", linewidth=2, color="tab:orange")
     axes[1].set_ylabel("Prompt tokens/s")
-    axes[1].set_xlabel("Actual prompt tokens reported by Ollama")
+    axes[1].set_xlabel("Actual prompt tokens reported by Ollama (log2 scale)")
     for axis in axes:
         axis.set_xscale("log", base=2)
         axis.set_xticks(x, labels)
@@ -341,8 +351,12 @@ def main() -> int:
     figures_dir = EXPERIMENT_DIR / "figures"
     results_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(results_dir / "request-measurements.csv", rows)
-    write_csv(results_dir / "prompt-length-aggregate.csv", aggregates)
+    measurement_path = results_dir / "request-measurements.csv"
+    aggregate_path = results_dir / "prompt-length-aggregate.csv"
+    write_csv(measurement_path, rows)
+    write_csv(aggregate_path, aggregates)
+    _normalize_generated_text(measurement_path)
+    _normalize_generated_text(aggregate_path)
     figures = _make_figures(aggregates, figures_dir)
     manifest_path = results_dir / "analysis-manifest.json"
     write_analysis_manifest(manifest_path, dataset, figures)

@@ -1,0 +1,35 @@
+{
+  "aggregation_unit": "individual measured request",
+  "analysis_version": "1.0",
+  "execution_id": "20260826T175114Z-2f660709",
+  "experiment_id": "exp-005-natural-corpus-prefill-scaling",
+  "figures": [
+    "figures/prefill-scaling.svg",
+    "figures/prefill-scaling.png",
+    "figures/client-latency-scaling.svg",
+    "figures/client-latency-scaling.png"
+  ],
+  "measurement_rows": 168,
+  "repetitions_per_trial": 7,
+  "run_ids": [
+    "20260826T175114Z-exp-005-natural-corpus-prefill-scaling-fixed-run-ef77a8ab",
+    "20260826T175228Z-exp-005-natural-corpus-prefill-scaling-fixed-run-35e5b7a0",
+    "20260826T175339Z-exp-005-natural-corpus-prefill-scaling-fixed-run-4ba8f416"
+  ],
+  "samples_per_prompt_length": 21,
+  "specification_sha256": "c2f5036112dae27bccf83c0b71edf49906e014afd5dbfda4b3cb1aabc7842df9",
+  "target_prompt_tokens": [
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384
+  ],
+  "trial_count": 3,
+  "warnings": [
+    "13 short requests completed between 100 ms GPU samples; request-level GPU fields are incomplete for those rows."
+  ]
+}

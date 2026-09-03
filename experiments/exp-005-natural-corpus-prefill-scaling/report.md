@@ -1,8 +1,8 @@
 # Ollama Prefill Scaling With Natural-Language Prompt Length
 
-**Status:** Preflight passed; ready for full run
+**Status:** Complete
 **Experiment ID:** `exp-005-natural-corpus-prefill-scaling`
-**Execution ID:** Not run
+**Execution ID:** `20260826T175114Z-2f660709`
 
 ## Question
 
@@ -20,10 +20,11 @@ challenge the hypothesis.
 
 ## System Under Test
 
-The planned fixed configuration is:
+The measured fixed configuration was:
 
 - Ollama `0.32.15`
-- `qwen2.5:7b-instruct`, expected local digest prefix `845dbda0ea48`
+- `qwen2.5:7b-instruct`, digest
+  `845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e`
 - Ollama's packaged Qwen2.5 7B Q4 model artifact
 - One NVIDIA RTX A6000 with approximately 48 GB VRAM
 - One request at a time and one loaded model
@@ -90,7 +91,7 @@ reports sample count, actual prompt-count range, median, mean, p95, observed ran
 and standard deviation for prompt-evaluation duration, plus prompt-throughput and
 client-latency summaries.
 
-Planned outputs:
+Published outputs:
 
 - `results/request-measurements.csv`
 - `results/prompt-length-aggregate.csv`
@@ -100,15 +101,59 @@ Planned outputs:
 
 ## Results
 
-The one-pass output preflight completed successfully on August 26, 2026. All eight
-requests returned HTTP 200 and passed the exact-match `OK` validator, including the
-16,384-token prompt. The preflight used no warmup, so its first 128-token request
-included cold model loading and is not a scaling measurement. Private artifacts are
-stored under ignored `runs/20260826T171513Z-exp005-preflight-8f92227b/`.
+The full three-trial experiment completed on August 26, 2026 in 3 minutes 35
+seconds. All 168 measured requests returned successfully and passed the exact-match
+`OK` validator. Ollama reported exactly the target prompt-token count at every
+length, and every response contained two output tokens.
 
-The full three-trial experiment has not run. Replace this section with the measured
-prompt-duration curve, throughput curve, failures, and relevant GPU-state
-observations after execution.
+The first request of the first warmup pass spent 3,616 ms loading the model. It was
+excluded from the measured data, as were all 24 warmup requests. The first measured
+128-token request had a 28.4 ms engine prompt-evaluation duration and 46.8 ms
+end-to-end latency, confirming that cold loading did not enter the primary results.
+
+| Prompt tokens | Samples | Median prefill (ms) | P95 prefill (ms) | Median prompt tokens/s | Median TTFT (ms) | Median E2E (ms) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128 | 21 | 28.38 | 29.40 | 4,510 | 35.36 | 45.61 |
+| 256 | 21 | 52.15 | 53.42 | 4,909 | 61.77 | 72.23 |
+| 512 | 21 | 98.34 | 99.28 | 5,206 | 109.70 | 120.44 |
+| 1,024 | 21 | 191.48 | 193.71 | 5,348 | 212.35 | 223.09 |
+| 2,048 | 21 | 379.44 | 382.08 | 5,397 | 405.36 | 416.48 |
+| 4,096 | 21 | 774.52 | 782.12 | 5,288 | 816.68 | 828.57 |
+| 8,192 | 21 | 1,654.78 | 1,667.02 | 4,951 | 1,758.83 | 1,770.70 |
+| 16,384 | 21 | 3,715.34 | 3,749.69 | 4,410 | 3,879.70 | 3,894.03 |
+
+![Prefill duration and throughput on a log2 prompt-token axis](figures/prefill-scaling.svg)
+
+The shared x-axis is logarithmic (base 2). Each horizontal step therefore represents
+a doubling of the actual prompt tokens reported by Ollama; this makes the change in
+scaling rate visible without crowding the shorter prompts at the left edge.
+
+Prompt throughput increased by 19.7% from 4,510 tokens/s at 128 tokens to a peak
+of 5,397 tokens/s at 2,048 tokens. It then declined by 18.3% from that peak to 4,410
+tokens/s at 16,384 tokens. From 2,048 to 16,384 tokens, an 8x increase in prompt
+length produced a 9.8x increase in median prompt-evaluation duration. The
+greater-than-linear growth at the long-prompt end is visible both as an upward bend
+in duration and as falling throughput.
+
+![Client latency](figures/client-latency-scaling.svg)
+
+Client TTFT closely followed engine prompt-evaluation duration. The median gap
+between the two increased from about 7 ms at 128 tokens to 164 ms at 16,384 tokens;
+the two-token response then added roughly 10--14 ms to end-to-end latency. Timing
+variance within each prompt length was low: prompt-evaluation standard deviation
+was at most 1.4% of its mean.
+
+GPU memory remained exactly 6,628 MiB throughout the measured phases, consistent
+with one resident model and the fixed 32K KV-cache allocation. Mean measured-phase
+GPU utilization was 82--85%, with samples reaching 100%. The GPU warmed from
+46--70 C during trial 1 to 75--82 C during trial 3. No software thermal, hardware
+thermal, or hardware slowdown flags were recorded.
+
+Long-prompt medians nevertheless slowed across the fixed-order trials: the
+16,384-token median increased from 3,628.8 ms in trial 1 to 3,743.5 ms in trial 3,
+a 3.2% increase. The corresponding 4K and 8K increases were both about 2.9%. The
+temperature and timing changes are correlated, but this experiment does not isolate
+temperature as their cause.
 
 ## Interpretation Guide
 
@@ -132,8 +177,12 @@ observations after execution.
   they are not a general model-family or engine comparison.
 - The fixed 32K context allocation deliberately prevents this experiment from
   interpreting memory changes as per-token KV-cache growth.
-- The shortest requests may complete between 100 ms telemetry samples. Ollama's
-  engine timing remains available, but request-aligned GPU statistics may be absent.
+- Thirteen short measured requests completed between telemetry samples. This does
+  not affect Ollama's primary prompt-evaluation timing, but their request-level GPU
+  fields are incomplete.
+- Trials ran in fixed order without a cooldown. The roughly 3% long-prompt slowdown
+  as the GPU warmed means the aggregate includes a small time/thermal drift; this
+  experiment cannot attribute that drift causally.
 - The runner environment controlling prompt caching is recorded in the protocol and
   private server log, not automatically captured as an Ollama API model property.
 - Expected Hugging Face tokenizer counts may differ slightly from the packaged
@@ -141,8 +190,18 @@ observations after execution.
 
 ## Conclusion
 
-To be completed after the experiment. State whether the measured prefill-duration
-and throughput curves support or challenge the hypothesis.
+The results support the hypothesis. Larger prompts initially used the GPU more
+efficiently, raising prompt throughput through 2,048 tokens. Beyond that point,
+prompt-evaluation duration grew faster than token count and throughput declined,
+which is consistent with increasing length-dependent attention work. Client TTFT
+tracked the same curve, so the dominant length-dependent latency came from engine
+prefill rather than a separate client-side cost.
+
+This establishes the expected single-request Ollama prefill curve on the tested
+RTX A6000 configuration. It also identifies two useful follow-ups: repeat the
+long-prompt measurements under controlled thermal starting conditions, and compare
+the same workload across Ollama, vLLM, and the PyTorch reference while preserving
+model precision and runtime controls as closely as possible.
 
 ## Reproduction
 
@@ -194,11 +253,12 @@ time .venv/bin/inference-lab experiment run \
   experiments/exp-005-natural-corpus-prefill-scaling
 ```
 
-Analyze the latest complete execution:
+Analyze this execution:
 
 ```bash
 .venv/bin/python \
-  experiments/exp-005-natural-corpus-prefill-scaling/analysis.py
+  experiments/exp-005-natural-corpus-prefill-scaling/analysis.py \
+  --execution-id 20260826T175114Z-2f660709
 ```
 
 Stop Ollama after the run:
